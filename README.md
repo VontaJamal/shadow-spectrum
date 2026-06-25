@@ -4,7 +4,8 @@ A macOS-first personal desktop visualizer for music already playing on your comp
 
 ## What it does
 
-- Captures desktop audio in Electron where the OS and Electron runtime allow loopback capture.
+- Captures system audio on macOS through a native ScreenCaptureKit helper.
+- Keeps the Electron loopback path available for Windows.
 - Falls back to microphone or synthetic demo audio.
 - Converts audio into in-memory Web Audio features.
 - Renders full-screen Three.js visual presets inspired by modern audio art.
@@ -34,7 +35,7 @@ npm run dev:renderer
 
 ## macOS audio capture notes
 
-Electron's built-in loopback capture is currently Windows-only. On macOS, use microphone mode with speakers, demo mode, or route Spotify through a virtual audio device such as BlackHole and select that device as an input.
+The System source uses Apple's ScreenCaptureKit framework through a small Swift helper. macOS may ask for Screen Recording permission the first time system audio capture starts. Audio is analyzed in memory and streamed to the renderer as visualizer features; it is not recorded or saved.
 
 ## Verification
 

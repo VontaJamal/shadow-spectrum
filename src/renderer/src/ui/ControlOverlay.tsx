@@ -19,7 +19,7 @@ interface ControlOverlayProps {
 
 const sourceOptions: Array<{ id: AudioSourceKind; label: string }> = [
   { id: 'synthetic-demo', label: 'Demo' },
-  { id: 'desktop-loopback', label: 'Desktop' },
+  { id: 'desktop-loopback', label: 'System' },
   { id: 'microphone', label: 'Mic' }
 ];
 

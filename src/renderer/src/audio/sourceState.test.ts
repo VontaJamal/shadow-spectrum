@@ -26,9 +26,9 @@ describe('transitionSourceStatus', () => {
     expect(transitionSourceStatus('requesting', 'unsupported')).toBe('unsupported');
   });
 
-  it('treats Electron desktop loopback as Windows-only', () => {
+  it('supports native macOS capture and Windows loopback for system audio', () => {
     expect(isDesktopLoopbackSupported('win32')).toBe(true);
-    expect(isDesktopLoopbackSupported('darwin')).toBe(false);
+    expect(isDesktopLoopbackSupported('darwin')).toBe(true);
     expect(isDesktopLoopbackSupported('MacIntel')).toBe(false);
   });
 

@@ -2,6 +2,8 @@ node_modules/
 out/
 dist/
 coverage/
+native/bin/
+native/system-audio-helper/.build/
 .DS_Store
 .env
 .env.*
@@ -9,4 +11,3 @@ coverage/
 test-results/
 playwright-report/
 *.log
-

@@ -13,6 +13,11 @@ test('launches the Electron app and renders a nonblank visualizer', async () => 
   try {
     const page = await app.firstWindow();
     await page.waitForSelector('canvas.visualizer-canvas');
+    await expect
+      .poll(() => page.evaluate(() => window.visualizerApi?.platform), {
+        message: 'preload bridge should expose the visualizer API'
+      })
+      .toBe('darwin');
     await page.waitForTimeout(1_000);
 
     const hasPixels = await page.evaluate(() => {
@@ -42,4 +47,3 @@ test('launches the Electron app and renders a nonblank visualizer', async () => 
     await app.close();
   }
 });
-

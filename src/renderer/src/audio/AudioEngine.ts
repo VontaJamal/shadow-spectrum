@@ -19,6 +19,8 @@ export class AudioEngine {
   private currentSource?: AudioSource;
   private extractor = new FeatureExtractor();
   private frequencyData = new Uint8Array(0);
+  private nativeFeatureCleanup?: () => void;
+  private nativeStatusCleanup?: () => void;
   private rafId = 0;
   private silentFrames = 0;
   private sourceNode?: MediaStreamAudioSourceNode;
@@ -42,6 +44,11 @@ export class AudioEngine {
   async start(kind: AudioSourceKind): Promise<void> {
     this.stop();
     this.setStatus('requesting', 'Waiting for audio permission');
+
+    if (kind === 'desktop-loopback' && window.visualizerApi?.platform === 'darwin') {
+      await this.startNativeSystemAudio();
+      return;
+    }
 
     const source = createAudioSource(kind);
     this.currentSource = source;
@@ -68,6 +75,7 @@ export class AudioEngine {
   stop(): void {
     window.cancelAnimationFrame(this.rafId);
     this.rafId = 0;
+    this.stopNativeSystemAudio();
     this.stopMediaOnly();
     this.extractor.reset();
     this.silentFrames = 0;
@@ -87,6 +95,43 @@ export class AudioEngine {
     this.sourceNode = this.audioContext.createMediaStreamSource(stream);
     this.sourceNode.connect(this.analyser);
     this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+  }
+
+  private async startNativeSystemAudio(): Promise<void> {
+    const api = window.visualizerApi;
+    if (!api?.startSystemAudio || !api.onSystemAudioFeatures || !api.onSystemAudioStatus) {
+      this.setStatus('unsupported', 'Native macOS system audio capture is not available in this app shell');
+      throw new Error('Native macOS system audio capture is unavailable');
+    }
+
+    this.nativeFeatureCleanup = api.onSystemAudioFeatures((payload) => {
+      const features = deserializeNativeFeatures(payload, this.options.sensitivity);
+      if (!features) {
+        return;
+      }
+
+      this.callbacks.onFeatures(features);
+
+      if (this.status === 'requesting' || this.status === 'silent') {
+        this.setStatus(features.isSilent ? 'silent' : 'active', features.isSilent ? 'System audio is connected but silent' : 'System audio active');
+      }
+    });
+
+    this.nativeStatusCleanup = api.onSystemAudioStatus((payload) => {
+      const status = deserializeNativeStatus(payload);
+      if (!status) {
+        return;
+      }
+
+      this.setStatus(status.status, status.message);
+    });
+
+    const result = await api.startSystemAudio();
+    if (!result.ok) {
+      this.stopNativeSystemAudio();
+      this.setStatus('error', result.message);
+      throw new Error(result.message);
+    }
   }
 
   private tick = (): void => {
@@ -130,8 +175,87 @@ export class AudioEngine {
     this.analyser = undefined;
   }
 
+  private stopNativeSystemAudio(): void {
+    this.nativeFeatureCleanup?.();
+    this.nativeStatusCleanup?.();
+    this.nativeFeatureCleanup = undefined;
+    this.nativeStatusCleanup = undefined;
+    void window.visualizerApi?.stopSystemAudio?.();
+  }
+
   private setStatus(status: AudioSourceStatus, message: string): void {
     this.status = status;
     this.callbacks.onStatus(status, message);
   }
+}
+
+interface NativeFeaturePayload {
+  type: 'features';
+  features: {
+    rms: number;
+    bass: number;
+    mid: number;
+    treble: number;
+    centroid: number;
+    beatPulse: number;
+    frequencyBins: number[];
+    waveform: number[];
+    isSilent: boolean;
+  };
+}
+
+interface NativeStatusPayload {
+  type: 'status';
+  status: AudioSourceStatus;
+  message: string;
+}
+
+function deserializeNativeFeatures(payload: unknown, sensitivity: number): AudioFeatures | null {
+  if (!isNativeFeaturePayload(payload)) {
+    return null;
+  }
+
+  const scale = (value: number): number => Math.min(1, Math.max(0, value * sensitivity));
+  const scaleWaveform = (value: number): number => Math.min(1, Math.max(-1, value * sensitivity));
+
+  return {
+    rms: scale(payload.features.rms),
+    bass: scale(payload.features.bass),
+    mid: scale(payload.features.mid),
+    treble: scale(payload.features.treble),
+    centroid: scale(payload.features.centroid),
+    beatPulse: scale(payload.features.beatPulse),
+    frequencyBins: Float32Array.from(payload.features.frequencyBins.map(scale)),
+    waveform: Float32Array.from(payload.features.waveform.map(scaleWaveform)),
+    isSilent: payload.features.isSilent
+  };
+}
+
+function deserializeNativeStatus(payload: unknown): NativeStatusPayload | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const candidate = payload as Partial<NativeStatusPayload>;
+  if (candidate.type !== 'status' || typeof candidate.status !== 'string' || typeof candidate.message !== 'string') {
+    return null;
+  }
+
+  return candidate as NativeStatusPayload;
+}
+
+function isNativeFeaturePayload(payload: unknown): payload is NativeFeaturePayload {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  const candidate = payload as Partial<NativeFeaturePayload>;
+  const features = candidate.features;
+  return (
+    candidate.type === 'features' &&
+    Boolean(features) &&
+    typeof features?.rms === 'number' &&
+    Array.isArray(features.frequencyBins) &&
+    Array.isArray(features.waveform)
+  );
 }

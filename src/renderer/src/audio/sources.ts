@@ -44,7 +44,8 @@ export class UnsupportedCaptureError extends Error {
 }
 
 export function isDesktopLoopbackSupported(platform = window.visualizerApi?.platform ?? navigator.platform): boolean {
-  return platform.toLowerCase() === 'win32';
+  const normalized = platform.toLowerCase();
+  return normalized === 'win32' || normalized === 'darwin';
 }
 
 export async function withCaptureTimeout<T>(capture: Promise<T>, timeoutMs: number): Promise<T> {
@@ -106,7 +107,7 @@ class DesktopLoopbackSource extends BrowserAudioSource {
     this.message = 'Requesting desktop audio';
 
     if (!isDesktopLoopbackSupported()) {
-      this.message = 'Desktop loopback is not available on macOS here. Use Mic with speakers, or route Spotify through a virtual input.';
+      this.message = 'System audio capture is not available on this platform. Use Mic or Demo mode.';
       this.status = transitionSourceStatus(this.status, 'unsupported');
       throw new UnsupportedCaptureError(this.message);
     }
