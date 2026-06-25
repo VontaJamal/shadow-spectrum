@@ -31,7 +31,6 @@ export function App(): JSX.Element {
   const [status, setStatus] = useState<AudioSourceStatus>('idle');
   const [message, setMessage] = useState('Demo source ready');
   const [isRunning, setIsRunning] = useState(false);
-  const [featureSnapshot, setFeatureSnapshot] = useState<AudioFeatures>(() => createSilentAudioFeatures());
   const featuresRef = useRef<AudioFeatures>(createSilentAudioFeatures());
   const engineRef = useRef<AudioEngine | null>(null);
 
@@ -49,14 +48,6 @@ export function App(): JSX.Element {
 
     engineRef.current = created;
     return created;
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setFeatureSnapshot(featuresRef.current);
-    }, 180);
-
-    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -83,7 +74,6 @@ export function App(): JSX.Element {
   const stop = useCallback(() => {
     engine.stop();
     featuresRef.current = createSilentAudioFeatures();
-    setFeatureSnapshot(featuresRef.current);
   }, [engine]);
 
   const toggleFullscreen = useCallback(async () => {
@@ -110,7 +100,6 @@ export function App(): JSX.Element {
         running={isRunning}
       />
       <ControlOverlay
-        features={featureSnapshot}
         isRunning={isRunning}
         message={message}
         onSettingsChange={updateSettings}

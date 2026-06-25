@@ -1,12 +1,10 @@
-import { Maximize2, Mic2, MonitorSpeaker, Pause, Play, Sparkles } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { Maximize2, Pause, Play } from 'lucide-react';
 import type { VisualizerSettings } from '../App';
-import type { AudioFeatures, AudioSourceKind, AudioSourceStatus } from '../audio/types';
+import type { AudioSourceKind, AudioSourceStatus } from '../audio/types';
 import { palettes, presets } from '../visualization/options';
 import type { PaletteId, PresetId } from '../visualization/types';
 
 interface ControlOverlayProps {
-  features: AudioFeatures;
   isRunning: boolean;
   message: string;
   settings: VisualizerSettings;
@@ -24,7 +22,6 @@ const sourceOptions: Array<{ id: AudioSourceKind; label: string }> = [
 ];
 
 export function ControlOverlay({
-  features,
   isRunning,
   message,
   onSettingsChange,
@@ -156,33 +153,9 @@ export function ControlOverlay({
                 <span className="slider-value">{settings.sensitivity.toFixed(2)}</span>
               </span>
             </label>
-
-            <Meter label="Bass" value={features.bass} />
-            <Meter label="Mid" value={features.mid} />
-            <Meter label="Treble" value={features.treble} />
-          </div>
-
-          <div className="meter-row">
-            <Meter icon={<MonitorSpeaker size={15} />} label="RMS" value={features.rms} />
-            <Meter icon={<Sparkles size={15} />} label="Pulse" value={features.beatPulse} />
-            <Meter icon={<Mic2 size={15} />} label="Centroid" value={features.centroid} />
-            <Meter label={features.isSilent ? 'Silent' : 'Live'} value={features.isSilent ? 0.08 : 1} />
           </div>
         </section>
       </div>
-    </div>
-  );
-}
-
-function Meter({ icon, label, value }: { icon?: JSX.Element; label: string; value: number }): JSX.Element {
-  return (
-    <div className="meter-field">
-      <span className="meter-label">
-        {icon} {label}
-      </span>
-      <span aria-label={`${label} meter`} className="meter">
-        <span className="meter-fill" style={{ '--value': Math.max(0, Math.min(1, value)) } as CSSProperties} />
-      </span>
     </div>
   );
 }

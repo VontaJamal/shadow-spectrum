@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { createSilentAudioFeatures } from '../audio/featureExtractor';
 import type { VisualizerSettings } from '../App';
 import { ControlOverlay } from './ControlOverlay';
 
@@ -22,7 +21,6 @@ describe('ControlOverlay', () => {
 
     const { rerender } = render(
       <ControlOverlay
-        features={createSilentAudioFeatures()}
         isRunning={false}
         message="Ready"
         onSettingsChange={vi.fn()}
@@ -39,7 +37,6 @@ describe('ControlOverlay', () => {
 
     rerender(
       <ControlOverlay
-        features={createSilentAudioFeatures()}
         isRunning
         message="Active"
         onSettingsChange={vi.fn()}
@@ -61,7 +58,6 @@ describe('ControlOverlay', () => {
 
     render(
       <ControlOverlay
-        features={createSilentAudioFeatures()}
         isRunning={false}
         message="Ready"
         onSettingsChange={onSettingsChange}
@@ -80,4 +76,3 @@ describe('ControlOverlay', () => {
     expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-ribbons' });
   });
 });
-
