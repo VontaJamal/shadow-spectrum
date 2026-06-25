@@ -39,7 +39,7 @@ export function ControlOverlay({
         : status;
 
   return (
-    <div className="control-overlay">
+    <div className="control-overlay" data-running={isRunning ? 'true' : 'false'}>
       <div className="top-strip">
         <div className="brand-lockup">
           <strong>Spectra Drift</strong>

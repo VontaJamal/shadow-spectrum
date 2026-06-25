@@ -15,21 +15,27 @@ export const palettes: Array<{ id: PaletteId; label: string }> = [
 
 const paletteMap: Record<PaletteId, Palette> = {
   aurora: {
-    background: '#05070a',
+    background: '#020407',
+    fog: '#07131b',
+    glow: '#b9fff2',
     primary: '#7df9c6',
-    secondary: '#2bd9ff',
+    secondary: '#38bdf8',
     hot: '#ff6b8a',
     soft: '#fffaf0'
   },
   ember: {
-    background: '#070607',
-    primary: '#ffaf45',
-    secondary: '#f85f73',
+    background: '#050304',
+    fog: '#1a0808',
+    glow: '#ffe2a8',
+    primary: '#ffb84d',
+    secondary: '#ff6a3d',
     hot: '#7df9c6',
     soft: '#fff7ea'
   },
   'mono-gold': {
-    background: '#070707',
+    background: '#030303',
+    fog: '#14120a',
+    glow: '#fff0b8',
     primary: '#ffd166',
     secondary: '#f7f0d5',
     hot: '#7df9c6',
@@ -40,4 +46,3 @@ const paletteMap: Record<PaletteId, Palette> = {
 export function getPalette(id: PaletteId): Palette {
   return paletteMap[id] ?? paletteMap.aurora;
 }
-

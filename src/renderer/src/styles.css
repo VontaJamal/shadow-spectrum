@@ -46,10 +46,7 @@ button {
   min-width: 320px;
   min-height: 520px;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 18% 20%, rgba(125, 249, 198, 0.16), transparent 30%),
-    radial-gradient(circle at 82% 74%, rgba(255, 107, 138, 0.13), transparent 34%),
-    #05070a;
+  background: #020407;
 }
 
 .visualizer-canvas {
@@ -76,6 +73,37 @@ button {
   pointer-events: none;
   padding: 22px;
   gap: 18px;
+}
+
+.control-overlay .top-strip,
+.control-overlay .bottom-strip {
+  transition:
+    opacity 420ms ease,
+    transform 420ms ease,
+    filter 420ms ease;
+}
+
+.control-overlay[data-running="true"] .top-strip,
+.control-overlay[data-running="true"] .bottom-strip {
+  opacity: 0.28;
+  filter: saturate(0.7);
+}
+
+.control-overlay[data-running="true"] .top-strip {
+  transform: translateY(-4px);
+}
+
+.control-overlay[data-running="true"] .bottom-strip {
+  transform: translateY(6px);
+}
+
+.control-overlay[data-running="true"]:hover .top-strip,
+.control-overlay[data-running="true"]:hover .bottom-strip,
+.control-overlay[data-running="true"]:focus-within .top-strip,
+.control-overlay[data-running="true"]:focus-within .bottom-strip {
+  opacity: 1;
+  filter: saturate(1);
+  transform: translateY(0);
 }
 
 .top-strip,

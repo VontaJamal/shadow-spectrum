@@ -75,4 +75,23 @@ describe('ControlOverlay', () => {
     expect(onSettingsChange).toHaveBeenCalledWith({ sourceMode: 'microphone' });
     expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-ribbons' });
   });
+
+  it('marks the overlay as running so controls can recede and reveal on focus or hover', () => {
+    const { container } = render(
+      <ControlOverlay
+        isRunning
+        message="Active"
+        onSettingsChange={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onToggleFullscreen={vi.fn()}
+        settings={settings}
+        status="active"
+      />
+    );
+
+    expect(container.querySelector('.control-overlay')).toHaveAttribute('data-running', 'true');
+    expect(screen.getByRole('button', { name: /stop capture/i })).toBeVisible();
+    expect(screen.getByLabelText(/preset/i)).toBeVisible();
+  });
 });
