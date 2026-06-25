@@ -76,8 +76,6 @@ export function App(): JSX.Element {
     try {
       await engine.start(settings.sourceMode);
     } catch {
-      setStatus('error');
-      setMessage('Capture did not start');
       setIsRunning(false);
     }
   }, [engine, settings.sourceMode]);
@@ -125,4 +123,3 @@ export function App(): JSX.Element {
     </main>
   );
 }
-

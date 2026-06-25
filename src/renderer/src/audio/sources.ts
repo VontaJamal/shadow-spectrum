@@ -21,6 +21,10 @@ export function transitionSourceStatus(status: AudioSourceStatus, event: AudioSo
     return 'permission-denied';
   }
 
+  if (event === 'unsupported') {
+    return 'unsupported';
+  }
+
   if (event === 'error') {
     return 'error';
   }
@@ -30,6 +34,32 @@ export function transitionSourceStatus(status: AudioSourceStatus, event: AudioSo
   }
 
   return status;
+}
+
+export class UnsupportedCaptureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedCaptureError';
+  }
+}
+
+export function isDesktopLoopbackSupported(platform = window.visualizerApi?.platform ?? navigator.platform): boolean {
+  return platform.toLowerCase() === 'win32';
+}
+
+export async function withCaptureTimeout<T>(capture: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId = 0;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error('Capture request timed out'));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([capture, timeout]);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export function createAudioSource(kind: AudioSourceKind): AudioSource {
@@ -75,18 +105,27 @@ class DesktopLoopbackSource extends BrowserAudioSource {
     this.status = transitionSourceStatus(this.status, 'request');
     this.message = 'Requesting desktop audio';
 
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: 1,
-        width: 1,
-        height: 1
-      },
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    });
+    if (!isDesktopLoopbackSupported()) {
+      this.message = 'Desktop loopback is not available on macOS here. Use Mic with speakers, or route Spotify through a virtual input.';
+      this.status = transitionSourceStatus(this.status, 'unsupported');
+      throw new UnsupportedCaptureError(this.message);
+    }
+
+    const stream = await withCaptureTimeout(
+      navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: 1,
+          width: 1,
+          height: 1
+        },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      }),
+      8_000
+    );
 
     stream.getVideoTracks().forEach((track) => track.stop());
 
@@ -188,4 +227,3 @@ class SyntheticDemoSource extends BrowserAudioSource {
     super.stop();
   }
 }
-

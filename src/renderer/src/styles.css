@@ -144,6 +144,7 @@ button {
 }
 
 .status-pill[data-status="error"] .status-dot,
+.status-pill[data-status="unsupported"] .status-dot,
 .status-pill[data-status="permission-denied"] .status-dot {
   background: var(--hot);
   box-shadow: 0 0 18px rgba(255, 107, 138, 0.72);
@@ -337,4 +338,3 @@ button {
     grid-template-columns: 1fr;
   }
 }
-

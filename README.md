@@ -34,7 +34,7 @@ npm run dev:renderer
 
 ## macOS audio capture notes
 
-Desktop loopback capture depends on macOS permissions and Electron support. If desktop capture is denied or silent, switch to microphone mode or use demo mode. For older macOS setups, routing Spotify through a virtual audio device such as BlackHole can provide a predictable microphone-like input.
+Electron's built-in loopback capture is currently Windows-only. On macOS, use microphone mode with speakers, demo mode, or route Spotify through a virtual audio device such as BlackHole and select that device as an input.
 
 ## Verification
 
@@ -52,4 +52,3 @@ npm run test:e2e
 ```
 
 System audio permissions are not covered by CI because CI cannot grant macOS media permissions.
-

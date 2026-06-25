@@ -34,7 +34,12 @@ export function ControlOverlay({
   settings,
   status
 }: ControlOverlayProps): JSX.Element {
-  const statusTone = status === 'permission-denied' || status === 'error' ? status : status === 'active' ? 'active' : status;
+  const statusTone =
+    status === 'permission-denied' || status === 'unsupported' || status === 'error'
+      ? status
+      : status === 'active'
+        ? 'active'
+        : status;
 
   return (
     <div className="control-overlay">

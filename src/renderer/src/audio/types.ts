@@ -5,6 +5,7 @@ export type AudioSourceStatus =
   | 'requesting'
   | 'active'
   | 'silent'
+  | 'unsupported'
   | 'permission-denied'
   | 'error'
   | 'stopped';
@@ -14,6 +15,7 @@ export type AudioSourceEvent =
   | 'stream-started'
   | 'silence-detected'
   | 'audio-detected'
+  | 'unsupported'
   | 'permission-denied'
   | 'error'
   | 'stop';
@@ -46,4 +48,3 @@ export interface AudioSource {
   stop(): void;
   getStream(): MediaStream | undefined;
 }
-

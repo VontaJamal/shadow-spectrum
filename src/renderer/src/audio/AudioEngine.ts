@@ -1,5 +1,5 @@
 import { FeatureExtractor } from './featureExtractor';
-import { createAudioSource, transitionSourceStatus } from './sources';
+import { UnsupportedCaptureError, createAudioSource, transitionSourceStatus } from './sources';
 import type {
   AnalysisOptions,
   AudioFeatures,
@@ -53,7 +53,12 @@ export class AudioEngine {
       await this.connectStream(stream);
       this.tick();
     } catch (error) {
-      const status = error instanceof DOMException && error.name === 'NotAllowedError' ? 'permission-denied' : 'error';
+      const status =
+        error instanceof UnsupportedCaptureError
+          ? 'unsupported'
+          : error instanceof DOMException && error.name === 'NotAllowedError'
+            ? 'permission-denied'
+            : 'error';
       this.setStatus(status, source.message);
       this.stopMediaOnly();
       throw error;
@@ -130,4 +135,3 @@ export class AudioEngine {
     this.callbacks.onStatus(status, message);
   }
 }
-

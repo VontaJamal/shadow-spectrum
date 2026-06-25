@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transitionSourceStatus } from './sources';
+import { isDesktopLoopbackSupported, transitionSourceStatus, withCaptureTimeout } from './sources';
 
 describe('transitionSourceStatus', () => {
   it('moves idle sources into requesting state', () => {
@@ -21,5 +21,18 @@ describe('transitionSourceStatus', () => {
   it('marks stopped sources as stopped', () => {
     expect(transitionSourceStatus('silent', 'stop')).toBe('stopped');
   });
-});
 
+  it('marks unsupported sources explicitly', () => {
+    expect(transitionSourceStatus('requesting', 'unsupported')).toBe('unsupported');
+  });
+
+  it('treats Electron desktop loopback as Windows-only', () => {
+    expect(isDesktopLoopbackSupported('win32')).toBe(true);
+    expect(isDesktopLoopbackSupported('darwin')).toBe(false);
+    expect(isDesktopLoopbackSupported('MacIntel')).toBe(false);
+  });
+
+  it('times out unresolved capture requests', async () => {
+    await expect(withCaptureTimeout(new Promise(() => undefined), 1)).rejects.toThrow('Capture request timed out');
+  });
+});
