@@ -69,8 +69,8 @@ private final class JsonLineWriter {
 @available(macOS 13.0, *)
 private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
   private let output = JsonLineWriter()
-  private let sampleQueue = DispatchQueue(label: "dev.codex.spectra-drift.system-audio.samples")
-  private let analysisQueue = DispatchQueue(label: "dev.codex.spectra-drift.system-audio.analysis")
+  private let sampleQueue = DispatchQueue(label: "dev.codex.shadow-spectrum.system-audio.samples")
+  private let analysisQueue = DispatchQueue(label: "dev.codex.shadow-spectrum.system-audio.analysis")
   private var stream: SCStream?
   private var samples: [Double] = []
   private var bandEnvelopes = Array(repeating: 0.0, count: visualBandCount)

@@ -15,6 +15,24 @@ const settings: VisualizerSettings = {
 };
 
 describe('ControlOverlay', () => {
+  it('renders the Shadow Spectrum brand and omits the retired Spectra Drift name', () => {
+    render(
+      <ControlOverlay
+        isRunning={false}
+        message="Ready"
+        onSettingsChange={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onToggleFullscreen={vi.fn()}
+        settings={settings}
+        status="idle"
+      />
+    );
+
+    expect(screen.getByText('Shadow Spectrum')).toBeVisible();
+    expect(screen.queryByText('Spectra Drift')).not.toBeInTheDocument();
+  });
+
   it('starts and stops capture from the primary button', async () => {
     const user = userEvent.setup();
     const onStart = vi.fn();

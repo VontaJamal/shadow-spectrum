@@ -3,6 +3,7 @@ import type { VisualizerSettings } from '../App';
 import type { AudioSourceKind, AudioSourceStatus } from '../audio/types';
 import { palettes, presets } from '../visualization/options';
 import type { PaletteId, PresetId } from '../visualization/types';
+import { APP_NAME } from '../../../shared/branding';
 
 interface ControlOverlayProps {
   isRunning: boolean;
@@ -42,7 +43,7 @@ export function ControlOverlay({
     <div className="control-overlay" data-running={isRunning ? 'true' : 'false'}>
       <div className="top-strip">
         <div className="brand-lockup">
-          <strong>Spectra Drift</strong>
+          <strong>{APP_NAME}</strong>
           <span>Local audio visualizer</span>
         </div>
         <div className="status-cluster">

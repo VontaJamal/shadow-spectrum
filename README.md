@@ -1,4 +1,4 @@
-# Spectra Drift
+# Shadow Spectrum
 
 A macOS-first personal desktop visualizer for music already playing on your computer. It does not log in to Spotify, control Spotify, or read Spotify's protected stream. Instead, it reacts to live audio that you choose to capture locally.
 
