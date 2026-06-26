@@ -29,6 +29,20 @@ function Harness(): JSX.Element {
   );
 }
 
+function LegacyHarness(): JSX.Element {
+  const [settings] = usePersistedSettings<TestSettings>(
+    'shadow-spectrum-settings',
+    defaultSettings,
+    normalizeSettings,
+    { legacyKeys: ['spectra-drift-settings'] }
+  );
+  return (
+    <output data-testid="settings">
+      {settings.presetId}:{String(settings.autoCycle)}
+    </output>
+  );
+}
+
 describe('usePersistedSettings', () => {
   it('normalizes stale stored preset ids while preserving other stored settings', () => {
     window.localStorage.setItem(
@@ -58,5 +72,21 @@ describe('usePersistedSettings', () => {
       presetId: 'liquid-veil',
       autoCycle: true
     });
+  });
+
+  it('migrates settings from the retired Spectra Drift storage key', () => {
+    window.localStorage.setItem(
+      'spectra-drift-settings',
+      JSON.stringify({ presetId: 'electric-fold', autoCycle: true })
+    );
+
+    render(<LegacyHarness />);
+
+    expect(screen.getByTestId('settings')).toHaveTextContent('electric-fold:true');
+    expect(JSON.parse(window.localStorage.getItem('shadow-spectrum-settings') ?? '{}')).toEqual({
+      presetId: 'electric-fold',
+      autoCycle: true
+    });
+    expect(window.localStorage.getItem('spectra-drift-settings')).toBeNull();
   });
 });

@@ -8,6 +8,10 @@ import { defaultPresetId, normalizePresetId } from './visualization/options';
 import type { PaletteId, PresetId } from './visualization/types';
 import { VisualAutoCycleController } from './visualization/autoCycle';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
+import {
+  LEGACY_SETTINGS_STORAGE_KEYS as legacySettingsStorageKeys,
+  SETTINGS_STORAGE_KEY as settingsStorageKey
+} from '../../shared/branding';
 import './styles.css';
 
 export interface VisualizerSettings {
@@ -39,9 +43,10 @@ export function normalizeVisualizerSettings(settings: VisualizerSettings): Visua
 
 export function App(): JSX.Element {
   const [settings, setSettings] = usePersistedSettings<VisualizerSettings>(
-    'spectra-drift-settings',
+    settingsStorageKey,
     defaultSettings,
-    normalizeVisualizerSettings
+    normalizeVisualizerSettings,
+    { legacyKeys: legacySettingsStorageKeys }
   );
   const [status, setStatus] = useState<AudioSourceStatus>('idle');
   const [message, setMessage] = useState('Demo source ready');

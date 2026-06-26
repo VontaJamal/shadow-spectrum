@@ -1,5 +1,5 @@
 {
-  "name": "spectra-drift",
+  "name": "shadow-spectrum",
   "version": "0.1.0",
   "description": "A personal Spotify-adjacent desktop audio visualizer.",
   "main": "out/main/index.js",
@@ -48,13 +48,13 @@
     "vitest": "^3.2.6"
   },
   "build": {
-    "appId": "dev.codex.spectra-drift",
-    "productName": "Spectra Drift",
+    "appId": "dev.codex.shadow-spectrum",
+    "productName": "Shadow Spectrum",
     "mac": {
       "category": "public.app-category.music",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Spectra Drift can use the microphone as an audio-reactive fallback source.",
-        "NSScreenCaptureUsageDescription": "Spectra Drift can capture desktop audio for local real-time visualization."
+        "NSMicrophoneUsageDescription": "Shadow Spectrum can use the microphone as an audio-reactive fallback source.",
+        "NSScreenCaptureUsageDescription": "Shadow Spectrum can capture desktop audio for local real-time visualization."
       }
     }
   }
