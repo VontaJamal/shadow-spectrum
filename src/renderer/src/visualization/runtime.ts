@@ -54,7 +54,7 @@ export class VisualizerRuntime {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  private readonly ambient = new THREE.AmbientLight(0xffffff, 0.55);
+  private readonly ambient = new THREE.AmbientLight(0xffffff, 0.42);
   private readonly currentFrameTarget = createRenderTarget(1, 1);
   private feedbackRead = createRenderTarget(1, 1);
   private feedbackWrite = createRenderTarget(1, 1);
@@ -81,7 +81,7 @@ export class VisualizerRuntime {
   private readonly feedbackQuad = new THREE.Mesh(this.screenGeometry, this.feedbackMaterial);
   private readonly finalQuad = new THREE.Mesh(this.screenGeometry, this.finalMaterial);
   private readonly renderPass = new RenderPass(this.finalScene, this.screenCamera);
-  private readonly bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.72, 0.58, 0.08);
+  private readonly bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.34, 0.38, 0.18);
   private readonly composer: EffectComposer;
   private readonly director = new SceneDirector();
   private readonly spectrum = new AudioSpectrumTexture();
@@ -114,7 +114,7 @@ export class VisualizerRuntime {
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.96;
+    this.renderer.toneMappingExposure = 0.68;
     this.renderer.setClearColor(this.palette.background, 1);
 
     this.scene.add(this.ambient);
@@ -334,12 +334,12 @@ export class VisualizerRuntime {
     uniforms.tPrevious.value = this.feedbackRead.texture;
     uniforms.tCurrent.value = this.currentFrameTarget.texture;
     uniforms.uTime.value = time * 0.001;
-    uniforms.uDecay.value = clamp(evolution.dna.feedbackDecay - features.onsetPulse * 0.018, 0.82, 0.96);
+    uniforms.uDecay.value = clamp(evolution.dna.feedbackDecay - 0.024 - features.onsetPulse * 0.018, 0.78, 0.92);
     uniforms.uScale.value = clamp(evolution.dna.feedbackScale + features.bassPulse * 0.003, 0.975, 1.035);
     uniforms.uRotation.value = evolution.dna.feedbackRotation * 0.012 + features.spectralFlux * 0.002;
     uniforms.uTranslate.value.set(evolution.dna.feedbackTranslateX, evolution.dna.feedbackTranslateY);
     uniforms.uDisplacement.value = clamp(evolution.dna.feedbackDisplacement + features.treblePulse * 0.012, 0, 0.06);
-    uniforms.uCurrentMix.value = clamp(0.46 + features.energy * 0.18 + features.onsetPulse * 0.14);
+    uniforms.uCurrentMix.value = clamp(0.42 + features.energy * 0.16 + features.onsetPulse * 0.14, 0.34, 0.68);
     uniforms.uFade.value = transition.feedbackFade;
     uniforms.uColorShift.value = evolution.dna.colorPhase;
 
@@ -395,11 +395,11 @@ class SceneDirector {
     this.cameraZ = lerp(this.cameraZ, targetZ, alpha);
     camera.position.set(this.cameraX, this.cameraY, this.cameraZ);
     camera.lookAt(dna.centerX * 0.18, dna.centerY * 0.18, 0);
-    renderer.toneMappingExposure = 0.9 + Math.min(0.5, features.energy * 0.28 + features.onsetPulse * 0.24 + evolution.macroEvent * 0.06);
-    bloomPass.strength = 0.5 + Math.min(1, features.energy * 0.54 + features.onsetPulse * 0.6 + features.spectralFlux * 0.3);
-    bloomPass.radius = 0.38 + Math.min(0.36, features.treblePulse * 0.18 + features.spectralFlatness * 0.08);
+    renderer.toneMappingExposure = 0.72 + Math.min(0.28, features.energy * 0.16 + features.onsetPulse * 0.1 + evolution.macroEvent * 0.04);
+    bloomPass.strength = 0.2 + Math.min(0.36, features.energy * 0.26 + features.onsetPulse * 0.32 + features.spectralFlux * 0.16);
+    bloomPass.radius = 0.24 + Math.min(0.18, features.treblePulse * 0.1 + features.spectralFlatness * 0.05);
     if (scene.fog instanceof THREE.FogExp2) {
-      scene.fog.density = 0.026 + features.energy * 0.012 + features.spectralFlatness * 0.006 + evolution.dna.turbulence * 0.004;
+      scene.fog.density = 0.034 + features.energy * 0.008 + features.spectralFlatness * 0.004 + evolution.dna.turbulence * 0.004;
     }
   }
 }
@@ -559,10 +559,10 @@ const feedbackFragmentShader = `
     vec2 radial = normalize(p + 0.0001) * warp * uDisplacement;
     vec2 previousUv = center + p + radial;
     vec3 previous = texture2D(tPrevious, previousUv).rgb * uDecay * (1.0 - uFade);
-    vec3 current = texture2D(tCurrent, vUv).rgb * uCurrentMix;
+    vec3 current = max(texture2D(tCurrent, vUv).rgb - vec3(0.004), vec3(0.0)) * uCurrentMix;
     previous = mix(previous, previous.gbr, uColorShift * 0.025);
-    vec3 color = clamp(previous + current, vec3(0.0), vec3(1.6));
-    color = max(color - vec3(0.004), vec3(0.0));
+    vec3 color = clamp(previous + current, vec3(0.0), vec3(1.22));
+    color = max(color - vec3(0.006), vec3(0.0));
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -575,6 +575,15 @@ const finalFragmentShader = `
 
   void main() {
     vec3 color = texture2D(tMap, vUv).rgb;
+    vec2 p = vUv - 0.5;
+    float vignette = smoothstep(0.78, 0.28, length(p));
+    color = max(color - vec3(0.006), vec3(0.0));
+    color *= 0.9 + vignette * 0.16;
+    color = pow(color, vec3(0.92));
+    color *= 0.92 + vignette * 0.18;
+    color += vec3(0.004, 0.006, 0.008);
+    float peak = max(max(color.r, color.g), color.b);
+    color *= min(1.0, 0.86 / max(peak, 0.001));
     gl_FragColor = vec4(color, 1.0);
   }
 `;

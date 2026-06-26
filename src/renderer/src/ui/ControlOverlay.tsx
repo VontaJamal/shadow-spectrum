@@ -22,6 +22,8 @@ const sourceOptions: Array<{ id: AudioSourceKind; label: string }> = [
   { id: 'microphone', label: 'Mic' }
 ];
 
+const changeVisualsHelp = 'Switches presets on musical changes or about every minute.';
+
 export function ControlOverlay({
   isRunning,
   message,
@@ -123,13 +125,14 @@ export function ControlOverlay({
               </select>
             </label>
 
-            <label className="control-field toggle-field">
-              <span>Auto-cycle</span>
+            <label className="control-field toggle-field" title={changeVisualsHelp}>
+              <span>Change visuals</span>
               <span className="toggle-row">
                 <input
-                  aria-label="Auto-cycle"
+                  aria-label="Change visuals automatically"
                   checked={settings.autoCycle}
                   onChange={(event) => onSettingsChange({ autoCycle: event.target.checked })}
+                  title={changeVisualsHelp}
                   type="checkbox"
                 />
                 <span aria-hidden="true" className="toggle-switch" />
