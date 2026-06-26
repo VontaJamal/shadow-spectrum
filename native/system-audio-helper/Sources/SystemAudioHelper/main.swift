@@ -4,8 +4,14 @@ import Foundation
 import ScreenCaptureKit
 
 private let visualBandCount = 24
-private let historySize = 64
+private let historyWindowSeconds = 8.0
+private let onsetDensityWindowSeconds = 6.0
 private let minimumBandFrequency = 35.0
+
+private struct TimedValue {
+  let time: Double
+  let value: Double
+}
 
 private struct FeaturePayload: Encodable {
   let type: String
@@ -19,6 +25,7 @@ private struct StatusPayload: Encodable {
 }
 
 private struct AudioFeatures: Encodable {
+  let timestampMs: Double
   let rms: Double
   let bass: Double
   let mid: Double
@@ -39,6 +46,11 @@ private struct AudioFeatures: Encodable {
   let bands: [Double]
   let bandEnvelopes: [Double]
   let bandPeaks: [Double]
+  let bandTransients: [Double]
+  let slowBands: [Double]
+  let novelty: Double
+  let onsetDensity: Double
+  let loudnessTrend: Double
   let isSilent: Bool
 }
 
@@ -75,16 +87,21 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
   private var samples: [Double] = []
   private var bandEnvelopes = Array(repeating: 0.0, count: visualBandCount)
   private var bandPeaks = Array(repeating: 0.0, count: visualBandCount)
+  private var bandTransients = Array(repeating: 0.0, count: visualBandCount)
+  private var slowBands = Array(repeating: 0.0, count: visualBandCount)
+  private var previousBands = Array(repeating: 0.0, count: visualBandCount)
   private var previousFrequencyBins: [Double] = []
-  private var energyHistory: [Double] = []
-  private var bassHistory: [Double] = []
-  private var midHistory: [Double] = []
-  private var trebleHistory: [Double] = []
+  private var energyHistory: [TimedValue] = []
+  private var bassHistory: [TimedValue] = []
+  private var midHistory: [TimedValue] = []
+  private var trebleHistory: [TimedValue] = []
+  private var onsetHistory: [Double] = []
   private var previousOnsetPulse = 0.0
   private var previousBassPulse = 0.0
   private var previousMidPulse = 0.0
   private var previousTreblePulse = 0.0
   private var lastEmit = DispatchTime.now()
+  private var lastFeatureTime = DispatchTime.now()
   private var configuredSampleRate = 48_000.0
 
   func start() async {
@@ -240,9 +257,14 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
   }
 
   private func extractFeatures() -> AudioFeatures {
+    let now = DispatchTime.now()
+    let timestampMs = Double(now.uptimeNanoseconds) / 1_000_000
+    let timestampSeconds = timestampMs / 1_000
+    let deltaSeconds = min(0.25, max(1.0 / 240.0, Double(now.uptimeNanoseconds - lastFeatureTime.uptimeNanoseconds) / 1_000_000_000))
+    lastFeatureTime = now
     let windowSize = min(1_024, samples.count)
     guard windowSize > 32 else {
-      return silentFeatures()
+      return silentFeatures(timestampMs: timestampMs)
     }
 
     let window = Array(samples.suffix(windowSize))
@@ -259,8 +281,11 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     let flatness = spectralFlatness(bins)
     let rolloff = spectralRolloff(bins, threshold: 0.85)
     let dynamicRange = calculateDynamicRange(window, rms: rms)
+    let bandProfileDelta = calculateBandProfileDelta(bands, previousBands)
+    let loudnessTrend = normalizedTrend(energy, history: energyHistory)
+    let novelty = clamp(flux * 0.42 + bandProfileDelta * 0.95 + max(0, loudnessTrend) * 0.26 + dynamicRange * 0.08)
     let onsetPulse = adaptivePulse(
-      energy + flux * 0.35,
+      energy + flux * 0.35 + novelty * 0.16,
       history: energyHistory,
       previousPulse: previousOnsetPulse,
       floor: 0.018,
@@ -293,18 +318,27 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     )
     let beatPulse = clamp(max(bassPulse, onsetPulse * 0.78))
 
-    updateBandEnvelopeState(bands)
-    pushHistory(&energyHistory, energy)
-    pushHistory(&bassHistory, bass)
-    pushHistory(&midHistory, mid)
-    pushHistory(&trebleHistory, treble)
+    updateBandEnvelopeState(bands, deltaSeconds: deltaSeconds)
+    updateBandTransientState(bands, deltaSeconds: deltaSeconds)
+    updateSlowBandState(bands, deltaSeconds: deltaSeconds)
+    if onsetPulse > 0.18 || bassPulse > 0.28 {
+      onsetHistory.append(timestampSeconds)
+    }
+    pruneOnsets(timestampSeconds)
+    let onsetDensity = clamp(Double(onsetHistory.count) / 12.0)
+    pushHistory(&energyHistory, energy, timestampSeconds)
+    pushHistory(&bassHistory, bass, timestampSeconds)
+    pushHistory(&midHistory, mid, timestampSeconds)
+    pushHistory(&trebleHistory, treble, timestampSeconds)
     previousFrequencyBins = bins
+    previousBands = bands
     previousOnsetPulse = onsetPulse
     previousBassPulse = bassPulse
     previousMidPulse = midPulse
     previousTreblePulse = treblePulse
 
     return AudioFeatures(
+      timestampMs: timestampMs,
       rms: clamp(rms * 1.5),
       bass: bass,
       mid: mid,
@@ -325,6 +359,11 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
       bands: bands,
       bandEnvelopes: bandEnvelopes,
       bandPeaks: bandPeaks,
+      bandTransients: bandTransients,
+      slowBands: slowBands,
+      novelty: novelty,
+      onsetDensity: onsetDensity,
+      loudnessTrend: loudnessTrend,
       isSilent: rms < 0.008 && energy < 0.012 && bass < 0.012
     )
   }
@@ -453,7 +492,7 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
 
   private func adaptivePulse(
     _ value: Double,
-    history: [Double],
+    history: [TimedValue],
     previousPulse: Double,
     floor: Double,
     sensitivity: Double,
@@ -471,21 +510,81 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     return clamp(normalizedLift * sensitivity + previousPulse * 0.58)
   }
 
-  private func updateBandEnvelopeState(_ bands: [Double]) {
+  private func calculateBandProfileDelta(_ current: [Double], _ previous: [Double]) -> Double {
+    guard current.count == previous.count else {
+      return 0
+    }
+
+    var sum = 0.0
+    for index in 0..<current.count {
+      sum += abs(current[index] - previous[index])
+    }
+    return clamp(sum / Double(max(1, current.count)))
+  }
+
+  private func updateBandEnvelopeState(_ bands: [Double], deltaSeconds: Double) {
+    let attack = exponentialAlpha(deltaSeconds, timeConstant: 0.042)
+    let release = exponentialAlpha(deltaSeconds, timeConstant: 0.36)
+    let peakDecay = exp(-deltaSeconds / 1.9)
     for index in 0..<min(bands.count, bandEnvelopes.count) {
       let band = bands[index]
       let envelope = bandEnvelopes[index]
-      let attack = band > envelope ? 0.58 : 0.13
-      bandEnvelopes[index] = lerp(envelope, band, attack)
-      bandPeaks[index] = max(band, bandPeaks[index] * 0.965)
+      bandEnvelopes[index] = lerp(envelope, band, band > envelope ? attack : release)
+      bandPeaks[index] = max(band, bandPeaks[index] * peakDecay)
     }
   }
 
-  private func pushHistory(_ history: inout [Double], _ value: Double) {
-    history.append(value)
-    if history.count > historySize {
-      history.removeFirst(history.count - historySize)
+  private func updateBandTransientState(_ bands: [Double], deltaSeconds: Double) {
+    let decay = exp(-deltaSeconds / 0.14)
+    for index in 0..<min(bands.count, bandTransients.count) {
+      let lift = max(0, bands[index] - previousBands[index])
+      bandTransients[index] = max(lift * 1.8, bandTransients[index] * decay)
     }
+  }
+
+  private func updateSlowBandState(_ bands: [Double], deltaSeconds: Double) {
+    let alpha = exponentialAlpha(deltaSeconds, timeConstant: 2.6)
+    for index in 0..<min(bands.count, slowBands.count) {
+      slowBands[index] = lerp(slowBands[index], bands[index], alpha)
+    }
+  }
+
+  private func pushHistory(_ history: inout [TimedValue], _ value: Double, _ time: Double) {
+    history.append(TimedValue(time: time, value: value))
+    pruneHistory(&history, time)
+  }
+
+  private func pruneHistory(_ history: inout [TimedValue], _ time: Double) {
+    let cutoff = time - historyWindowSeconds
+    while let first = history.first, first.time < cutoff {
+      history.removeFirst()
+    }
+  }
+
+  private func pruneOnsets(_ time: Double) {
+    let cutoff = time - onsetDensityWindowSeconds
+    while let first = onsetHistory.first, first < cutoff {
+      onsetHistory.removeFirst()
+    }
+  }
+
+  private func average(_ values: [TimedValue]) -> Double {
+    guard !values.isEmpty else {
+      return 0
+    }
+
+    return values.reduce(0) { $0 + $1.value } / Double(values.count)
+  }
+
+  private func variance(_ values: [TimedValue], mean: Double) -> Double {
+    guard !values.isEmpty else {
+      return 0
+    }
+
+    return values.reduce(0) { partial, value in
+      let delta = value.value - mean
+      return partial + delta * delta
+    } / Double(values.count)
   }
 
   private func average(_ values: [Double]) -> Double {
@@ -496,15 +595,21 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     return values.reduce(0, +) / Double(values.count)
   }
 
-  private func variance(_ values: [Double], mean: Double) -> Double {
-    guard !values.isEmpty else {
+  private func normalizedTrend(_ value: Double, history: [TimedValue]) -> Double {
+    guard history.count >= 2 else {
       return 0
     }
 
-    return values.reduce(0) { partial, value in
-      let delta = value - mean
-      return partial + delta * delta
-    } / Double(values.count)
+    let baseline = average(history)
+    let spread = sqrt(variance(history, mean: baseline))
+    return clamp((value - baseline) / max(0.035, spread + 0.02), min: -1, max: 1)
+  }
+
+  private func exponentialAlpha(_ deltaSeconds: Double, timeConstant: Double) -> Double {
+    guard timeConstant > 0 else {
+      return 1
+    }
+    return clamp(1 - exp(-max(0, deltaSeconds) / timeConstant))
   }
 
   private func downsample(_ values: [Double], count: Int) -> [Double] {
@@ -518,8 +623,9 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     }
   }
 
-  private func silentFeatures() -> AudioFeatures {
+  private func silentFeatures(timestampMs: Double = 0) -> AudioFeatures {
     AudioFeatures(
+      timestampMs: timestampMs,
       rms: 0,
       bass: 0,
       mid: 0,
@@ -540,6 +646,11 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
       bands: Array(repeating: 0, count: visualBandCount),
       bandEnvelopes: Array(repeating: 0, count: visualBandCount),
       bandPeaks: Array(repeating: 0, count: visualBandCount),
+      bandTransients: Array(repeating: 0, count: visualBandCount),
+      slowBands: Array(repeating: 0, count: visualBandCount),
+      novelty: 0,
+      onsetDensity: 0,
+      loudnessTrend: 0,
       isSilent: true
     )
   }

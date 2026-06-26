@@ -4,8 +4,9 @@ import { createSilentAudioFeatures } from './audio/featureExtractor';
 import type { AudioFeatures, AudioSourceKind, AudioSourceStatus } from './audio/types';
 import { ControlOverlay } from './ui/ControlOverlay';
 import { VisualizerCanvas } from './visualization/VisualizerCanvas';
-import { defaultPresetId, normalizePresetId, presets } from './visualization/options';
+import { defaultPresetId, normalizePresetId } from './visualization/options';
 import type { PaletteId, PresetId } from './visualization/types';
+import { VisualAutoCycleController } from './visualization/autoCycle';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 import './styles.css';
 
@@ -29,9 +30,6 @@ const defaultSettings: VisualizerSettings = {
   fullscreen: false
 };
 
-const autoCycleArmMs = 45_000;
-const autoCycleFallbackMs = 60_000;
-
 export function normalizeVisualizerSettings(settings: VisualizerSettings): VisualizerSettings {
   return {
     ...settings,
@@ -50,6 +48,7 @@ export function App(): JSX.Element {
   const [isRunning, setIsRunning] = useState(false);
   const featuresRef = useRef<AudioFeatures>(createSilentAudioFeatures());
   const engineRef = useRef<AudioEngine | null>(null);
+  const autoCycleRef = useRef(new VisualAutoCycleController());
 
   const engine = useMemo(() => {
     const created = new AudioEngine({
@@ -85,30 +84,26 @@ export function App(): JSX.Element {
       return undefined;
     }
 
-    let cycleStartedAt = performance.now();
+    autoCycleRef.current.reset(performance.now(), settings.presetId);
     const intervalId = window.setInterval(() => {
-      const elapsed = performance.now() - cycleStartedAt;
-      const shouldAdvance = elapsed >= autoCycleArmMs && (featuresRef.current.onsetPulse >= 0.35 || elapsed >= autoCycleFallbackMs);
+      const decision = autoCycleRef.current.evaluate(performance.now(), settings.presetId, featuresRef.current);
 
-      if (!shouldAdvance) {
+      if (!decision) {
         return;
       }
 
       setSettings((current) => {
-        const currentIndex = presets.findIndex((preset) => preset.id === current.presetId);
-        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % presets.length : 0;
         return {
           ...current,
-          presetId: presets[nextIndex].id
+          presetId: decision.presetId
         };
       });
-      cycleStartedAt = performance.now();
     }, 250);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isRunning, setSettings, settings.autoCycle]);
+  }, [isRunning, setSettings, settings.autoCycle, settings.presetId]);
 
   const start = useCallback(async () => {
     try {

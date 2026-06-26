@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { createSilentAudioFeatures } from '../audio/featureExtractor';
 import { defaultPresetId, getPalette, normalizePresetId, palettes, presets } from './options';
 import { createPreset } from './presets';
+import { createRandomDna } from './evolution';
+import { SeededPrng } from './prng';
+import type { Palette, VisualFrameContext } from './types';
 
 describe('visualization options', () => {
   it('uses the new researched preset quartet in order', () => {
@@ -94,12 +97,68 @@ describe('visualization options', () => {
       const preset = createPreset(presetOption.id, palette);
       preset.init(scene);
       preset.resize({ width: 1440, height: 900 });
-      preset.update(activeFeatures, 16);
-      preset.update({ ...activeFeatures, onsetPulse: 0.1 }, 64);
-      preset.update({ ...activeFeatures, onsetPulse: 0.8, spectralFlux: 0.7 }, 240);
+      preset.update(createFrameContext(activeFeatures, palette, 16));
+      preset.update(createFrameContext({ ...activeFeatures, onsetPulse: 0.1 }, palette, 64));
+      preset.update(createFrameContext({ ...activeFeatures, onsetPulse: 0.8, spectralFlux: 0.7 }, palette, 240));
+      expectFiniteUniforms(scene);
       preset.dispose();
 
       expect(scene.children).toHaveLength(0);
     }
   });
 });
+
+function createFrameContext(features: ReturnType<typeof createSilentAudioFeatures>, palette: Palette, deltaMs: number): VisualFrameContext {
+  return {
+    features,
+    spectrumTexture: null,
+    evolution: {
+      seed: 0.25,
+      elapsedMs: deltaMs,
+      flow: deltaMs / 1000,
+      event: features.onsetPulse,
+      fastImpact: features.onsetPulse,
+      macroEvent: 0,
+      novelty: features.novelty,
+      dna: createRandomDna(new SeededPrng(12))
+    },
+    transition: {
+      activePresetId: 'vortex-eye',
+      outgoingPresetId: null,
+      progress: 1,
+      durationMs: 1,
+      feedbackFade: 0
+    },
+    palette,
+    deltaMs,
+    elapsedMs: deltaMs,
+    opacity: 1
+  };
+}
+
+function expectFiniteUniforms(scene: THREE.Scene): void {
+  scene.traverse((object) => {
+    const renderable = object as THREE.Mesh | THREE.Points | THREE.Line;
+    const materials = Array.isArray(renderable.material) ? renderable.material : [renderable.material];
+    for (const material of materials) {
+      const shader = material as THREE.ShaderMaterial | undefined;
+      if (!shader?.uniforms) {
+        continue;
+      }
+
+      for (const uniform of Object.values(shader.uniforms)) {
+        const value = uniform.value as unknown;
+        if (typeof value === 'number') {
+          expect(Number.isFinite(value)).toBe(true);
+        } else if (value instanceof THREE.Vector2) {
+          expect(Number.isFinite(value.x)).toBe(true);
+          expect(Number.isFinite(value.y)).toBe(true);
+        } else if (value instanceof THREE.Color) {
+          expect(Number.isFinite(value.r)).toBe(true);
+          expect(Number.isFinite(value.g)).toBe(true);
+          expect(Number.isFinite(value.b)).toBe(true);
+        }
+      }
+    }
+  });
+}

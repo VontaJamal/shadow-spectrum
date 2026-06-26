@@ -183,4 +183,104 @@ describe('FeatureExtractor', () => {
     expect(Math.max(...quiet.bandEnvelopes)).toBeLessThan(loudEnvelope);
     expect(Math.max(...quiet.bandEnvelopes)).toBeGreaterThan(0);
   });
+
+  it('keeps adaptive normalization useful for quiet material', () => {
+    const extractor = new FeatureExtractor();
+    for (let frame = 0; frame < 20; frame += 1) {
+      extractor.extract(makeFrequencyData(1024, [1, 360], 42), makeWaveform(2048, 14), {
+        sampleRate: 48_000,
+        sensitivity: 1,
+        smoothing: 0.8,
+        silenceThreshold: 0.01,
+        timestampMs: frame * 100
+      });
+    }
+
+    const quiet = extractor.extract(makeFrequencyData(1024, [1, 360], 36), makeWaveform(2048, 12), {
+      sampleRate: 48_000,
+      sensitivity: 1,
+      smoothing: 0.8,
+      silenceThreshold: 0.01,
+      timestampMs: 2_200
+    });
+
+    expect(Math.max(...quiet.bands)).toBeGreaterThan(0.2);
+    expect(Math.max(...quiet.bands)).toBeLessThanOrEqual(1);
+  });
+
+  it('uses time-based histories so pulse behavior is similar across update rates', () => {
+    const fast = new FeatureExtractor();
+    const slow = new FeatureExtractor();
+    for (let time = 0; time <= 8_000; time += 1000 / 60) {
+      fast.extract(makeFrequencyData(1024, [1, 32], 28), makeWaveform(2048, 12), {
+        sampleRate: 48_000,
+        sensitivity: 1,
+        smoothing: 0.8,
+        silenceThreshold: 0.01,
+        timestampMs: time
+      });
+    }
+    for (let time = 0; time <= 8_000; time += 1000 / 30) {
+      slow.extract(makeFrequencyData(1024, [1, 32], 28), makeWaveform(2048, 12), {
+        sampleRate: 48_000,
+        sensitivity: 1,
+        smoothing: 0.8,
+        silenceThreshold: 0.01,
+        timestampMs: time
+      });
+    }
+
+    const fastSpike = fast.extract(makeFrequencyData(1024, [1, 420], 230), makeWaveform(2048, 76), {
+      sampleRate: 48_000,
+      sensitivity: 1,
+      smoothing: 0.8,
+      silenceThreshold: 0.01,
+      timestampMs: 8_100
+    });
+    const slowSpike = slow.extract(makeFrequencyData(1024, [1, 420], 230), makeWaveform(2048, 76), {
+      sampleRate: 48_000,
+      sensitivity: 1,
+      smoothing: 0.8,
+      silenceThreshold: 0.01,
+      timestampMs: 8_100
+    });
+
+    expect(Math.abs(fastSpike.onsetPulse - slowSpike.onsetPulse)).toBeLessThan(0.25);
+  });
+
+  it('emits transient, slow, novelty, onset-density, and loudness-trend streams', () => {
+    const extractor = new FeatureExtractor();
+    for (let frame = 0; frame < 8; frame += 1) {
+      extractor.extract(makeFrequencyData(1024, [1, 32], 24), makeWaveform(2048, 12), {
+        sampleRate: 48_000,
+        sensitivity: 1,
+        smoothing: 0.8,
+        silenceThreshold: 0.01,
+        timestampMs: frame * 120
+      });
+    }
+
+    const spike = extractor.extract(makeFrequencyData(1024, [1, 700], 240), makeWaveform(2048, 80), {
+      sampleRate: 48_000,
+      sensitivity: 1,
+      smoothing: 0.8,
+      silenceThreshold: 0.01,
+      timestampMs: 1_100
+    });
+    const later = extractor.extract(makeFrequencyData(1024, [1, 700], 220), makeWaveform(2048, 72), {
+      sampleRate: 48_000,
+      sensitivity: 1,
+      smoothing: 0.8,
+      silenceThreshold: 0.01,
+      timestampMs: 2_600
+    });
+
+    expect(spike.bandTransients).toHaveLength(VISUAL_BAND_COUNT);
+    expect(spike.slowBands).toHaveLength(VISUAL_BAND_COUNT);
+    expect(Math.max(...spike.bandTransients)).toBeGreaterThan(0.1);
+    expect(Math.max(...later.slowBands)).toBeGreaterThan(Math.max(...spike.slowBands));
+    expect(spike.novelty).toBeGreaterThan(0.1);
+    expect(spike.onsetDensity).toBeGreaterThan(0);
+    expect(spike.loudnessTrend).toBeGreaterThan(0);
+  });
 });

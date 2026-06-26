@@ -2,15 +2,23 @@ import type { AnalysisOptions, AudioFeatures } from './types';
 
 interface ExtractOptions extends AnalysisOptions {
   sampleRate: number;
+  timestampMs?: number;
 }
 
-const emptyArray = new Float32Array(0);
+interface TimedSample {
+  timeMs: number;
+  value: number;
+}
+
 export const VISUAL_BAND_COUNT = 24;
-const HISTORY_SIZE = 64;
+const historyWindowMs = 8_000;
+const onsetDensityWindowMs = 6_000;
 const minimumBandFrequency = 35;
 
-export function createSilentAudioFeatures(): AudioFeatures {
+export function createSilentAudioFeatures(timestampMs = 0): AudioFeatures {
+  const bands = new Float32Array(VISUAL_BAND_COUNT);
   return {
+    timestampMs,
     rms: 0,
     bass: 0,
     mid: 0,
@@ -26,46 +34,68 @@ export function createSilentAudioFeatures(): AudioFeatures {
     bassPulse: 0,
     midPulse: 0,
     treblePulse: 0,
-    frequencyBins: emptyArray,
-    waveform: emptyArray,
-    bands: emptyArray,
-    bandEnvelopes: emptyArray,
-    bandPeaks: emptyArray,
+    frequencyBins: new Float32Array(0),
+    waveform: new Float32Array(0),
+    bands,
+    bandEnvelopes: new Float32Array(VISUAL_BAND_COUNT),
+    bandPeaks: new Float32Array(VISUAL_BAND_COUNT),
+    bandTransients: new Float32Array(VISUAL_BAND_COUNT),
+    slowBands: new Float32Array(VISUAL_BAND_COUNT),
+    novelty: 0,
+    onsetDensity: 0,
+    loudnessTrend: 0,
     isSilent: true
   };
 }
 
 export class FeatureExtractor {
+  private readonly normalizer = new AdaptiveBandNormalizer();
   private bandEnvelopes = new Float32Array(VISUAL_BAND_COUNT);
   private bandPeaks = new Float32Array(VISUAL_BAND_COUNT);
-  private energyHistory: number[] = [];
-  private bassHistory: number[] = [];
-  private midHistory: number[] = [];
-  private trebleHistory: number[] = [];
+  private bandTransients = new Float32Array(VISUAL_BAND_COUNT);
+  private slowBands = new Float32Array(VISUAL_BAND_COUNT);
+  private energyHistory = new TimedHistory(historyWindowMs);
+  private bassHistory = new TimedHistory(historyWindowMs);
+  private midHistory = new TimedHistory(historyWindowMs);
+  private trebleHistory = new TimedHistory(historyWindowMs);
+  private onsetHistory = new TimedHistory(onsetDensityWindowMs);
   private previousFrequencyBins: Float32Array<ArrayBufferLike> = new Float32Array(0);
+  private previousBands = new Float32Array(VISUAL_BAND_COUNT);
   private previousOnsetPulse = 0;
   private previousBassPulse = 0;
   private previousMidPulse = 0;
   private previousTreblePulse = 0;
+  private lastTimestampMs: number | null = null;
 
   reset(): void {
+    this.normalizer.reset();
     this.bandEnvelopes = new Float32Array(VISUAL_BAND_COUNT);
     this.bandPeaks = new Float32Array(VISUAL_BAND_COUNT);
-    this.energyHistory = [];
-    this.bassHistory = [];
-    this.midHistory = [];
-    this.trebleHistory = [];
+    this.bandTransients = new Float32Array(VISUAL_BAND_COUNT);
+    this.slowBands = new Float32Array(VISUAL_BAND_COUNT);
+    this.energyHistory.clear();
+    this.bassHistory.clear();
+    this.midHistory.clear();
+    this.trebleHistory.clear();
+    this.onsetHistory.clear();
     this.previousFrequencyBins = new Float32Array(0);
+    this.previousBands = new Float32Array(VISUAL_BAND_COUNT);
     this.previousOnsetPulse = 0;
     this.previousBassPulse = 0;
     this.previousMidPulse = 0;
     this.previousTreblePulse = 0;
+    this.lastTimestampMs = null;
   }
 
   extract(frequencyData: Uint8Array, waveformData: Uint8Array, options: ExtractOptions): AudioFeatures {
+    const timestampMs = options.timestampMs ?? globalThis.performance?.now?.() ?? Date.now();
     if (frequencyData.length === 0 || waveformData.length === 0) {
-      return createSilentAudioFeatures();
+      return createSilentAudioFeatures(timestampMs);
     }
+
+    const deltaMs =
+      this.lastTimestampMs === null ? 1000 / 60 : Math.min(250, Math.max(1, timestampMs - this.lastTimestampMs));
+    this.lastTimestampMs = timestampMs;
 
     const frequencyBins = normalizeByteArray(frequencyData, options.sensitivity);
     const waveform = normalizeWaveform(waveformData);
@@ -75,14 +105,18 @@ export class FeatureExtractor {
     const mid = averageFrequencyRange(frequencyBins, 250, 4_000, nyquist);
     const treble = averageFrequencyRange(frequencyBins, 4_000, nyquist, nyquist);
     const centroid = calculateCentroid(frequencyBins, nyquist);
-    const bands = calculateLogBands(frequencyBins, nyquist, VISUAL_BAND_COUNT);
+    const rawBands = calculateLogBands(frequencyBins, nyquist, VISUAL_BAND_COUNT);
+    const bands = this.normalizer.update(rawBands, deltaMs);
     const averageBandEnergy = averageArray(bands);
     const energy = clamp(rms * 1.2 + averageBandEnergy * 0.68 + bass * 0.28);
     const spectralFlux = calculateSpectralFlux(frequencyBins, this.previousFrequencyBins);
     const spectralFlatness = calculateSpectralFlatness(frequencyBins);
     const spectralRolloff = calculateSpectralRolloff(frequencyBins, 0.85);
     const dynamicRange = calculateDynamicRange(waveform, rms);
-    const onsetPulse = adaptivePulse(energy + spectralFlux * 0.35, this.energyHistory, this.previousOnsetPulse, {
+    const bandProfileDelta = calculateBandProfileDelta(bands, this.previousBands);
+    const loudnessTrend = this.energyHistory.normalizedTrend(energy);
+    const novelty = clamp(spectralFlux * 0.42 + bandProfileDelta * 0.95 + Math.max(0, loudnessTrend) * 0.26 + dynamicRange * 0.08);
+    const onsetPulse = adaptivePulse(energy + spectralFlux * 0.35 + novelty * 0.16, this.energyHistory, this.previousOnsetPulse, {
       floor: 0.018,
       sensitivity: 1.35,
       spreadScale: 1.65
@@ -104,18 +138,30 @@ export class FeatureExtractor {
     });
     const beatPulse = clamp(Math.max(bassPulse, onsetPulse * 0.78));
 
-    updateBandEnvelopeState(this.bandEnvelopes, this.bandPeaks, bands);
-    pushHistory(this.energyHistory, energy);
-    pushHistory(this.bassHistory, bass);
-    pushHistory(this.midHistory, mid);
-    pushHistory(this.trebleHistory, treble);
+    updateBandEnvelopeState(this.bandEnvelopes, this.bandPeaks, bands, deltaMs);
+    updateBandTransientState(this.bandTransients, bands, this.previousBands, deltaMs);
+    updateSlowBandState(this.slowBands, bands, deltaMs);
+
+    if (onsetPulse > 0.18 || bassPulse > 0.28) {
+      this.onsetHistory.push(timestampMs, 1);
+    } else {
+      this.onsetHistory.prune(timestampMs);
+    }
+    const onsetDensity = clamp(this.onsetHistory.count / 12);
+
+    this.energyHistory.push(timestampMs, energy);
+    this.bassHistory.push(timestampMs, bass);
+    this.midHistory.push(timestampMs, mid);
+    this.trebleHistory.push(timestampMs, treble);
     this.previousFrequencyBins = frequencyBins;
+    this.previousBands = new Float32Array(bands);
     this.previousOnsetPulse = onsetPulse;
     this.previousBassPulse = bassPulse;
     this.previousMidPulse = midPulse;
     this.previousTreblePulse = treblePulse;
 
     return {
+      timestampMs,
       rms,
       bass,
       mid,
@@ -136,8 +182,101 @@ export class FeatureExtractor {
       bands,
       bandEnvelopes: new Float32Array(this.bandEnvelopes),
       bandPeaks: new Float32Array(this.bandPeaks),
+      bandTransients: new Float32Array(this.bandTransients),
+      slowBands: new Float32Array(this.slowBands),
+      novelty,
+      onsetDensity,
+      loudnessTrend,
       isSilent: rms < options.silenceThreshold && energy < options.silenceThreshold && bass < options.silenceThreshold
     };
+  }
+}
+
+class TimedHistory {
+  private samples: TimedSample[] = [];
+
+  constructor(private readonly windowMs: number) {}
+
+  get count(): number {
+    return this.samples.length;
+  }
+
+  push(timeMs: number, value: number): void {
+    this.samples.push({ timeMs, value });
+    this.prune(timeMs);
+  }
+
+  prune(timeMs: number): void {
+    const cutoff = timeMs - this.windowMs;
+    while (this.samples.length > 0 && this.samples[0].timeMs < cutoff) {
+      this.samples.shift();
+    }
+  }
+
+  clear(): void {
+    this.samples = [];
+  }
+
+  average(): number {
+    if (this.samples.length === 0) {
+      return 0;
+    }
+    let sum = 0;
+    for (const sample of this.samples) {
+      sum += sample.value;
+    }
+    return sum / this.samples.length;
+  }
+
+  variance(mean = this.average()): number {
+    if (this.samples.length === 0) {
+      return 0;
+    }
+    let sum = 0;
+    for (const sample of this.samples) {
+      const delta = sample.value - mean;
+      sum += delta * delta;
+    }
+    return sum / this.samples.length;
+  }
+
+  normalizedTrend(value: number): number {
+    if (this.samples.length < 2) {
+      return 0;
+    }
+    const baseline = this.average();
+    const spread = Math.sqrt(this.variance(baseline));
+    return clamp((value - baseline) / Math.max(0.035, spread + 0.02), -1, 1);
+  }
+}
+
+class AdaptiveBandNormalizer {
+  private floors = new Float32Array(VISUAL_BAND_COUNT);
+  private ceilings = new Float32Array(VISUAL_BAND_COUNT).fill(0.08);
+
+  reset(): void {
+    this.floors = new Float32Array(VISUAL_BAND_COUNT);
+    this.ceilings = new Float32Array(VISUAL_BAND_COUNT).fill(0.08);
+  }
+
+  update(rawBands: Float32Array, deltaMs: number): Float32Array {
+    const output = new Float32Array(VISUAL_BAND_COUNT);
+    const floorRise = exponentialAlpha(deltaMs, 12_000);
+    const floorFall = exponentialAlpha(deltaMs, 520);
+    const ceilingRise = exponentialAlpha(deltaMs, 160);
+    const ceilingFall = exponentialAlpha(deltaMs, 9_500);
+
+    for (let index = 0; index < VISUAL_BAND_COUNT; index += 1) {
+      const raw = clamp(rawBands[index] ?? 0);
+      const floorAlpha = raw < this.floors[index] ? floorFall : floorRise;
+      const ceilingAlpha = raw > this.ceilings[index] ? ceilingRise : ceilingFall;
+      this.floors[index] = lerp(this.floors[index], raw * 0.62, floorAlpha);
+      this.ceilings[index] = lerp(this.ceilings[index], Math.max(raw, 0.075), ceilingAlpha);
+      const range = Math.max(0.045, this.ceilings[index] - this.floors[index]);
+      output[index] = clamp((raw - this.floors[index] * 0.72) / range);
+    }
+
+    return output;
   }
 }
 
@@ -285,40 +424,66 @@ function calculateDynamicRange(waveform: Float32Array, rms: number): number {
   return clamp((peak - rms) * 1.7);
 }
 
+function calculateBandProfileDelta(current: Float32Array, previous: Float32Array): number {
+  if (previous.length !== current.length) {
+    return 0;
+  }
+
+  let sum = 0;
+  for (let index = 0; index < current.length; index += 1) {
+    sum += Math.abs(current[index] - previous[index]);
+  }
+  return clamp(sum / current.length);
+}
+
 interface AdaptivePulseOptions {
   floor: number;
   sensitivity: number;
   spreadScale: number;
 }
 
-function adaptivePulse(value: number, history: number[], previousPulse: number, options: AdaptivePulseOptions): number {
-  if (history.length === 0) {
+function adaptivePulse(value: number, history: TimedHistory, previousPulse: number, options: AdaptivePulseOptions): number {
+  if (history.count === 0) {
     return 0;
   }
 
-  const baseline = averageArray(history);
-  const spread = Math.sqrt(variance(history, baseline));
+  const baseline = history.average();
+  const spread = Math.sqrt(history.variance(baseline));
   const threshold = baseline + spread * options.spreadScale + options.floor;
   const lift = Math.max(0, value - threshold);
   const normalizedLift = lift / Math.max(options.floor * 1.6, spread + options.floor);
   return clamp(normalizedLift * options.sensitivity + previousPulse * 0.58);
 }
 
-function updateBandEnvelopeState(envelopes: Float32Array, peaks: Float32Array, bands: Float32Array): void {
+function updateBandEnvelopeState(envelopes: Float32Array, peaks: Float32Array, bands: Float32Array, deltaMs: number): void {
+  const attack = exponentialAlpha(deltaMs, 42);
+  const release = exponentialAlpha(deltaMs, 360);
+  const peakDecay = Math.exp(-deltaMs / 1_900);
   for (let index = 0; index < bands.length; index += 1) {
     const band = bands[index] ?? 0;
     const envelope = envelopes[index] ?? 0;
-    const attack = band > envelope ? 0.58 : 0.13;
-    envelopes[index] = lerp(envelope, band, attack);
-    peaks[index] = Math.max(band, (peaks[index] ?? 0) * 0.965);
+    envelopes[index] = lerp(envelope, band, band > envelope ? attack : release);
+    peaks[index] = Math.max(band, (peaks[index] ?? 0) * peakDecay);
   }
 }
 
-function pushHistory(history: number[], value: number): void {
-  history.push(value);
-  if (history.length > HISTORY_SIZE) {
-    history.shift();
+function updateBandTransientState(transients: Float32Array, bands: Float32Array, previousBands: Float32Array, deltaMs: number): void {
+  const decay = Math.exp(-deltaMs / 140);
+  for (let index = 0; index < bands.length; index += 1) {
+    const lift = Math.max(0, (bands[index] ?? 0) - (previousBands[index] ?? 0));
+    transients[index] = Math.max(lift * 1.8, transients[index] * decay);
   }
+}
+
+function updateSlowBandState(slowBands: Float32Array, bands: Float32Array, deltaMs: number): void {
+  const alpha = exponentialAlpha(deltaMs, 2_600);
+  for (let index = 0; index < bands.length; index += 1) {
+    slowBands[index] = lerp(slowBands[index] ?? 0, bands[index] ?? 0, alpha);
+  }
+}
+
+function exponentialAlpha(deltaMs: number, timeConstantMs: number): number {
+  return clamp(1 - Math.exp(-Math.max(0, deltaMs) / timeConstantMs));
 }
 
 function averageArray(values: ArrayLike<number>): number {
@@ -329,20 +494,6 @@ function averageArray(values: ArrayLike<number>): number {
   let sum = 0;
   for (let index = 0; index < values.length; index += 1) {
     sum += values[index];
-  }
-
-  return sum / values.length;
-}
-
-function variance(values: number[], mean: number): number {
-  if (values.length === 0) {
-    return 0;
-  }
-
-  let sum = 0;
-  for (const value of values) {
-    const delta = value - mean;
-    sum += delta * delta;
   }
 
   return sum / values.length;
