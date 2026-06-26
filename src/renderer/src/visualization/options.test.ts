@@ -53,6 +53,15 @@ describe('visualization options', () => {
     }
   });
 
+  it('keeps glow and soft palette tones away from near-white washout', () => {
+    for (const paletteOption of palettes) {
+      const palette = getPalette(paletteOption.id);
+
+      expect(relativeLuminance(palette.glow)).toBeLessThan(0.72);
+      expect(relativeLuminance(palette.soft)).toBeLessThan(0.72);
+    }
+  });
+
   it('creates every preset through the preset factory', () => {
     const palette = getPalette('aurora');
 
@@ -134,6 +143,14 @@ function createFrameContext(features: ReturnType<typeof createSilentAudioFeature
     elapsedMs: deltaMs,
     opacity: 1
   };
+}
+
+function relativeLuminance(hex: string): number {
+  const red = Number.parseInt(hex.slice(1, 3), 16) / 255;
+  const green = Number.parseInt(hex.slice(3, 5), 16) / 255;
+  const blue = Number.parseInt(hex.slice(5, 7), 16) / 255;
+
+  return red * 0.2126 + green * 0.7152 + blue * 0.0722;
 }
 
 function expectFiniteUniforms(scene: THREE.Scene): void {

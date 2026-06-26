@@ -300,7 +300,7 @@ class PlasmaBowlPreset extends ShaderStagePreset {
     const material = new THREE.PointsMaterial({
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      opacity: 0.34,
+      opacity: 0.24,
       size: 0.038,
       transparent: true,
       vertexColors: true
@@ -359,8 +359,8 @@ class PlasmaBowlPreset extends ShaderStagePreset {
       }
       this.sparks.geometry.attributes.position.needsUpdate = true;
       const material = this.sparks.material as THREE.PointsMaterial;
-      material.opacity = 0.12 + signal.energy * 0.26 + signal.bassPulse * 0.18 + signal.onset * 0.2;
-      material.size = 0.026 + signal.treble * 0.018 + signal.treblePulse * 0.026;
+      material.opacity = 0.08 + signal.energy * 0.2 + signal.bassPulse * 0.12 + signal.onset * 0.14;
+      material.size = 0.022 + signal.treble * 0.014 + signal.treblePulse * 0.018;
     }
 
     this.group.scale.setScalar(1 + signal.onset * 0.025 + signal.bassPulse * 0.02);
@@ -497,9 +497,11 @@ const shaderPrelude = `
   }
 
   vec4 luminous(vec3 color, float gain) {
-    vec3 toned = clamp(color, vec3(0.0), vec3(0.92));
-    float alpha = clamp(max(max(toned.r, toned.g), toned.b) * gain, 0.0, 0.88);
-    return vec4(toned * uOpacity, alpha * uOpacity);
+    vec3 toned = max(color - vec3(0.006), vec3(0.0));
+    toned = clamp(toned, vec3(0.0), vec3(0.82));
+    toned = pow(toned, vec3(0.9));
+    float alpha = clamp(max(max(toned.r, toned.g), toned.b) * gain, 0.0, 0.72);
+    return vec4(toned * (0.98 + uEnergy * 0.16) * uOpacity, alpha * uOpacity);
   }
 `;
 
@@ -529,18 +531,18 @@ const vortexEyeFragmentShader = `
     float scan = lineGlow(p.y + sin(p.x * (3.4 + uFieldDensity * 7.0) + uFlow * 4.0) * (0.012 + uEvent * 0.035 + highBand * 0.02), 0.008 + uTreblePulse * 0.016);
 
     vec3 cold = mix(uColorB * 0.85, uColorA, 0.45 + uCentroid * 0.25 + uPaletteMix * 0.2);
-    vec3 glow = mix(uColorD, uSoft, clamp(halo + spokes * 0.4 + uColorPhase * 0.18, 0.0, 1.0));
-    vec3 color = cold * iris * (0.7 + uEnergy * 0.6);
-    color += glow * pow(halo, 2.2) * (1.15 + uEnergy * 0.8);
+    vec3 glow = mix(uColorD, uSoft, clamp(halo * 0.38 + spokes * 0.18 + uColorPhase * 0.08, 0.0, 0.62));
+    vec3 color = cold * iris * (0.54 + uEnergy * 0.42);
+    color += glow * pow(halo, 2.45) * (0.72 + uEnergy * 0.48);
     color += uColorC * pow(spokes * rings, 2.0) * (0.14 + midBand * 0.18);
-    color += uSoft * scan * (0.22 + uTreble * 0.36 + highBand * 0.32);
+    color += mix(uSoft, uColorA, 0.45) * scan * (0.12 + uTreble * 0.2 + highBand * 0.18);
     color *= 1.0 - core * 0.92;
-    color += uColorD * exp(-r * 34.0) * (0.25 + pulse * 0.65);
+    color += uColorD * exp(-r * 38.0) * (0.16 + pulse * 0.42);
     color *= smoothstep(1.18, 0.28, r);
-    color = max(color - vec3(0.018), vec3(0.0));
-    color = pow(max(color, vec3(0.0)), vec3(0.82));
+    color = max(color - vec3(0.04), vec3(0.0));
+    color = pow(max(color, vec3(0.0)), vec3(0.95));
 
-    gl_FragColor = luminous(color, 1.25);
+    gl_FragColor = luminous(color, 0.98);
   }
 `;
 
@@ -570,18 +572,18 @@ const electricFoldFragmentShader = `
 
     vec3 violet = mix(uColorB, uColorC, uPaletteMix * 0.45);
     vec3 cyan = mix(uColorA, uColorD, uColorPhase * 0.35);
-    vec3 white = uSoft;
+    vec3 bright = mix(uSoft, cyan, 0.54);
     vec3 color = violet * pow(smoke, 8.0) * (0.025 + uEnergy * 0.08);
-    color += mix(violet, white, jaw) * jaw * (2.4 + uTreble * 0.7);
-    color += cyan * center * (1.15 + uTreblePulse * 1.35 + highBand * 0.55);
-    color += mix(cyan, violet, uMorph) * forks * (0.42 + uEvent * 0.78 + uFlux * 0.28);
-    color += uColorC * echo * (0.52 + uMidPulse * 0.62 + midBand * 0.28);
-    color += white * pow(flash, 4.0) * (0.06 + uOnset * 0.14);
+    color += mix(violet, bright, jaw * 0.7) * jaw * (1.75 + uTreble * 0.58);
+    color += cyan * center * (0.98 + uTreblePulse * 1.05 + highBand * 0.44);
+    color += mix(cyan, violet, uMorph) * forks * (0.42 + uEvent * 0.58 + uFlux * 0.24);
+    color += uColorC * echo * (0.5 + uMidPulse * 0.52 + midBand * 0.24);
+    color += bright * pow(flash, 4.2) * (0.05 + uOnset * 0.12);
     color *= smoothstep(1.18, 0.24, length(p));
-    color = max(color - vec3(0.032), vec3(0.0));
-    color = pow(color, vec3(0.78));
+    color = max(color - vec3(0.024), vec3(0.0));
+    color = pow(color, vec3(0.84));
 
-    gl_FragColor = luminous(color, 1.35);
+    gl_FragColor = luminous(color, 1.06);
   }
 `;
 
@@ -612,16 +614,16 @@ const liquidVeilFragmentShader = `
 
     vec3 cyan = mix(uColorA, uColorD, uPaletteMix * 0.36);
     vec3 violet = mix(uColorB, uColorC, uColorPhase * 0.42);
-    vec3 white = uSoft;
-    vec3 color = cyan * veilA * (0.55 + uEnergy * 0.45);
-    color += violet * veilB * (0.42 + uMorph * 0.35);
-    color += mix(cyan, violet, warpB) * sheet * (0.18 + uMidPulse * 0.18);
-    color += white * pow(centerGlow, 3.2) * (0.06 + uOnset * 0.16);
-    color += mix(white, violet, uVariant) * edgeSparkle;
+    vec3 bright = mix(uSoft, cyan, 0.5);
+    vec3 color = cyan * veilA * (0.38 + uEnergy * 0.3);
+    color += violet * veilB * (0.32 + uMorph * 0.24);
+    color += mix(cyan, violet, warpB) * sheet * (0.12 + uMidPulse * 0.12);
+    color += bright * pow(centerGlow, 3.5) * (0.035 + uOnset * 0.1);
+    color += mix(bright, violet, uVariant) * edgeSparkle * 0.62;
     color *= smoothstep(1.1, 0.22, r);
-    color = max(color - vec3(0.045), vec3(0.0));
+    color = max(color - vec3(0.062), vec3(0.0));
 
-    gl_FragColor = luminous(pow(color, vec3(0.78)), 1.25);
+    gl_FragColor = luminous(pow(color, vec3(0.96)), 0.92);
   }
 `;
 
@@ -649,20 +651,20 @@ const plasmaBowlFragmentShader = `
     float blueLip = lineGlow(gravity + 0.44 + sin(p.x * (8.0 + uFieldDensity * 7.0) + uFlow * 4.0) * (0.02 + uEvent * 0.035 + highBand * 0.02), 0.032 + uBassPulse * 0.025);
 
     vec3 red = mix(uColorC, uColorA, uPaletteMix * 0.24);
-    vec3 gold = mix(uColorD, uSoft, uBrightnessDistribution * 0.28);
+    vec3 gold = mix(uColorD, uSoft, uBrightnessDistribution * 0.16);
     vec3 blue = uColorB;
     vec3 color = vec3(0.01, 0.0, 0.0);
-    color += red * flame * (0.95 + uEnergy * 0.7);
-    color += gold * pow(flame, 2.3) * (1.1 + uOnset * 0.6);
-    color += blue * blueLip * (0.42 + uBassPulse * 0.7);
-    color += mix(red, gold, sparks) * sparks * (0.8 + uTreblePulse * 1.2 + highBand * 0.7);
-    color += gold * bowl * (0.32 + uBassPulse * 0.54);
-    color += mix(red, gold, hotCore) * hotCore * base * (0.28 + uEnergy * 0.28);
+    color += red * flame * (0.68 + uEnergy * 0.46);
+    color += gold * pow(flame, 2.4) * (0.72 + uOnset * 0.38);
+    color += blue * blueLip * (0.28 + uBassPulse * 0.44);
+    color += mix(red, gold, sparks) * sparks * (0.5 + uTreblePulse * 0.76 + highBand * 0.42);
+    color += gold * bowl * (0.22 + uBassPulse * 0.34);
+    color += mix(red, gold, hotCore) * hotCore * base * (0.18 + uEnergy * 0.2);
     color *= smoothstep(1.08, 0.18, r);
-    color = max(color - vec3(0.035), vec3(0.0));
-    color = pow(color, vec3(0.72));
+    color = max(color - vec3(0.052), vec3(0.0));
+    color = pow(color, vec3(0.92));
 
-    gl_FragColor = luminous(color, 1.1);
+    gl_FragColor = luminous(color, 0.9);
   }
 `;
 

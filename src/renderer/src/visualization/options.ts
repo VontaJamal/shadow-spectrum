@@ -35,30 +35,30 @@ export const palettes: Array<{ id: PaletteId; label: string }> = [
 const paletteMap: Record<PaletteId, Palette> = {
   aurora: {
     background: '#020407',
-    fog: '#07131b',
-    glow: '#b9fff2',
+    fog: '#031019',
+    glow: '#39bfb5',
     primary: '#7df9c6',
     secondary: '#38bdf8',
     hot: '#ff6b8a',
-    soft: '#fffaf0'
+    soft: '#5fcabb'
   },
   ember: {
     background: '#050304',
-    fog: '#1a0808',
-    glow: '#ffe2a8',
+    fog: '#120506',
+    glow: '#f29a4b',
     primary: '#ffb84d',
     secondary: '#ff6a3d',
     hot: '#7df9c6',
-    soft: '#fff7ea'
+    soft: '#dda054'
   },
   'mono-gold': {
     background: '#030303',
-    fog: '#14120a',
-    glow: '#fff0b8',
+    fog: '#0d0b05',
+    glow: '#d8a92e',
     primary: '#ffd166',
-    secondary: '#f7f0d5',
+    secondary: '#8f7d45',
     hot: '#7df9c6',
-    soft: '#fffaf0'
+    soft: '#c79f47'
   }
 };
 

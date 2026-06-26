@@ -95,7 +95,7 @@ describe('ControlOverlay', () => {
     expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-veil' });
   });
 
-  it('persists auto-cycle changes through the settings callback', async () => {
+  it('presents automatic preset changes in plain language', async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
 
@@ -112,7 +112,12 @@ describe('ControlOverlay', () => {
       />
     );
 
-    await user.click(screen.getByLabelText(/auto-cycle/i));
+    const changeVisualsToggle = screen.getByLabelText(/change visuals automatically/i);
+
+    expect(screen.getByText('Change visuals')).toBeVisible();
+    expect(screen.queryByText('Auto-cycle')).not.toBeInTheDocument();
+
+    await user.click(changeVisualsToggle);
 
     expect(onSettingsChange).toHaveBeenCalledWith({ autoCycle: true });
   });
