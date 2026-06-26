@@ -6,6 +6,8 @@ export type PaletteId = 'aurora' | 'ember' | 'mono-gold';
 
 export interface Palette {
   background: string;
+  fog: string;
+  glow: string;
   primary: string;
   secondary: string;
   hot: string;
@@ -25,4 +27,3 @@ export interface VisualizerPreset {
   resize(size: Size): void;
   dispose(): void;
 }
-

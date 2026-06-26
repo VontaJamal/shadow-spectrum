@@ -1,4 +1,24 @@
-import { expect, test, _electron as electron } from '@playwright/test';
+import { expect, test, _electron as electron, type Page } from '@playwright/test';
+
+async function canvasHasPixels(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('canvas.visualizer-canvas') as HTMLCanvasElement | null;
+    if (!canvas) {
+      return false;
+    }
+
+    const context = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (!context) {
+      return false;
+    }
+
+    const width = Math.max(1, canvas.width);
+    const height = Math.max(1, canvas.height);
+    const pixels = new Uint8Array(width * height * 4);
+    context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+    return pixels.some((value) => value > 0);
+  });
+}
 
 test('launches the Electron app and renders a nonblank visualizer', async () => {
   const app = await electron.launch({
@@ -20,28 +40,13 @@ test('launches the Electron app and renders a nonblank visualizer', async () => 
       .toBe('darwin');
     await page.waitForTimeout(1_000);
 
-    const hasPixels = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas.visualizer-canvas') as HTMLCanvasElement | null;
-      if (!canvas) {
-        return false;
-      }
-
-      const context = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
-      if (!context) {
-        return false;
-      }
-
-      const width = Math.max(1, canvas.width);
-      const height = Math.max(1, canvas.height);
-      const pixels = new Uint8Array(width * height * 4);
-      context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
-      return pixels.some((value) => value > 0);
-    });
-
-    expect(hasPixels).toBe(true);
+    await expect.poll(() => canvasHasPixels(page)).toBe(true);
 
     await page.getByLabel('Toggle fullscreen').click();
-    await page.getByLabel('Preset').selectOption('spectral-bloom');
+    for (const preset of ['particle-field', 'liquid-ribbons', 'spectral-bloom', 'waveform-orbit']) {
+      await page.getByLabel('Preset').selectOption(preset);
+      await expect.poll(() => canvasHasPixels(page), { message: `${preset} should render nonblank canvas output` }).toBe(true);
+    }
     await expect(page.getByLabel('Audio visualizer canvas')).toBeVisible();
   } finally {
     await app.close();
