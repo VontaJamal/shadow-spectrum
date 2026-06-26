@@ -4,6 +4,7 @@ import { createSilentAudioFeatures } from './audio/featureExtractor';
 import type { AudioFeatures, AudioSourceKind, AudioSourceStatus } from './audio/types';
 import { ControlOverlay } from './ui/ControlOverlay';
 import { VisualizerCanvas } from './visualization/VisualizerCanvas';
+import { presets } from './visualization/options';
 import type { PaletteId, PresetId } from './visualization/types';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 import './styles.css';
@@ -14,6 +15,7 @@ export interface VisualizerSettings {
   paletteId: PaletteId;
   sensitivity: number;
   smoothing: number;
+  autoCycle: boolean;
   fullscreen: boolean;
 }
 
@@ -23,8 +25,12 @@ const defaultSettings: VisualizerSettings = {
   paletteId: 'aurora',
   sensitivity: 1.1,
   smoothing: 0.78,
+  autoCycle: false,
   fullscreen: false
 };
+
+const autoCycleArmMs = 45_000;
+const autoCycleFallbackMs = 60_000;
 
 export function App(): JSX.Element {
   const [settings, setSettings] = usePersistedSettings<VisualizerSettings>('spectra-drift-settings', defaultSettings);
@@ -62,6 +68,36 @@ export function App(): JSX.Element {
       engineRef.current?.stop();
     };
   }, []);
+
+  useEffect(() => {
+    if (!settings.autoCycle || !isRunning) {
+      return undefined;
+    }
+
+    let cycleStartedAt = performance.now();
+    const intervalId = window.setInterval(() => {
+      const elapsed = performance.now() - cycleStartedAt;
+      const shouldAdvance = elapsed >= autoCycleArmMs && (featuresRef.current.onsetPulse >= 0.35 || elapsed >= autoCycleFallbackMs);
+
+      if (!shouldAdvance) {
+        return;
+      }
+
+      setSettings((current) => {
+        const currentIndex = presets.findIndex((preset) => preset.id === current.presetId);
+        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % presets.length : 0;
+        return {
+          ...current,
+          presetId: presets[nextIndex].id
+        };
+      });
+      cycleStartedAt = performance.now();
+    }, 250);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isRunning, setSettings, settings.autoCycle]);
 
   const start = useCallback(async () => {
     try {

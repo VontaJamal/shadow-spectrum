@@ -3,6 +3,10 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
+private let visualBandCount = 24
+private let historySize = 64
+private let minimumBandFrequency = 35.0
+
 private struct FeaturePayload: Encodable {
   let type: String
   let features: AudioFeatures
@@ -21,8 +25,20 @@ private struct AudioFeatures: Encodable {
   let treble: Double
   let centroid: Double
   let beatPulse: Double
+  let energy: Double
+  let spectralFlux: Double
+  let spectralFlatness: Double
+  let spectralRolloff: Double
+  let dynamicRange: Double
+  let onsetPulse: Double
+  let bassPulse: Double
+  let midPulse: Double
+  let treblePulse: Double
   let frequencyBins: [Double]
   let waveform: [Double]
+  let bands: [Double]
+  let bandEnvelopes: [Double]
+  let bandPeaks: [Double]
   let isSilent: Bool
 }
 
@@ -57,8 +73,17 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
   private let analysisQueue = DispatchQueue(label: "dev.codex.spectra-drift.system-audio.analysis")
   private var stream: SCStream?
   private var samples: [Double] = []
-  private var previousBass = 0.0
-  private var previousPulse = 0.0
+  private var bandEnvelopes = Array(repeating: 0.0, count: visualBandCount)
+  private var bandPeaks = Array(repeating: 0.0, count: visualBandCount)
+  private var previousFrequencyBins: [Double] = []
+  private var energyHistory: [Double] = []
+  private var bassHistory: [Double] = []
+  private var midHistory: [Double] = []
+  private var trebleHistory: [Double] = []
+  private var previousOnsetPulse = 0.0
+  private var previousBassPulse = 0.0
+  private var previousMidPulse = 0.0
+  private var previousTreblePulse = 0.0
   private var lastEmit = DispatchTime.now()
   private var configuredSampleRate = 48_000.0
 
@@ -227,11 +252,57 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     let mid = averageBand(bins, minFrequency: 250, maxFrequency: 4_000)
     let treble = averageBand(bins, minFrequency: 4_000, maxFrequency: configuredSampleRate / 2)
     let centroid = spectralCentroid(bins)
-    let rawPulse = max(0, bass - previousBass * 0.82) * 3.4
-    let beatPulse = clamp(rawPulse + previousPulse * 0.72)
+    let bands = makeLogBands(bins, count: visualBandCount)
+    let averageBandEnergy = average(bands)
+    let energy = clamp(rms * 1.2 + averageBandEnergy * 0.68 + bass * 0.28)
+    let flux = spectralFlux(bins, previousFrequencyBins)
+    let flatness = spectralFlatness(bins)
+    let rolloff = spectralRolloff(bins, threshold: 0.85)
+    let dynamicRange = calculateDynamicRange(window, rms: rms)
+    let onsetPulse = adaptivePulse(
+      energy + flux * 0.35,
+      history: energyHistory,
+      previousPulse: previousOnsetPulse,
+      floor: 0.018,
+      sensitivity: 1.35,
+      spreadScale: 1.65
+    )
+    let bassPulse = adaptivePulse(
+      bass,
+      history: bassHistory,
+      previousPulse: previousBassPulse,
+      floor: 0.014,
+      sensitivity: 1.6,
+      spreadScale: 1.45
+    )
+    let midPulse = adaptivePulse(
+      mid,
+      history: midHistory,
+      previousPulse: previousMidPulse,
+      floor: 0.016,
+      sensitivity: 1.28,
+      spreadScale: 1.55
+    )
+    let treblePulse = adaptivePulse(
+      treble,
+      history: trebleHistory,
+      previousPulse: previousTreblePulse,
+      floor: 0.016,
+      sensitivity: 1.22,
+      spreadScale: 1.55
+    )
+    let beatPulse = clamp(max(bassPulse, onsetPulse * 0.78))
 
-    previousBass = bass
-    previousPulse = beatPulse
+    updateBandEnvelopeState(bands)
+    pushHistory(&energyHistory, energy)
+    pushHistory(&bassHistory, bass)
+    pushHistory(&midHistory, mid)
+    pushHistory(&trebleHistory, treble)
+    previousFrequencyBins = bins
+    previousOnsetPulse = onsetPulse
+    previousBassPulse = bassPulse
+    previousMidPulse = midPulse
+    previousTreblePulse = treblePulse
 
     return AudioFeatures(
       rms: clamp(rms * 1.5),
@@ -240,9 +311,21 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
       treble: treble,
       centroid: centroid,
       beatPulse: beatPulse,
+      energy: energy,
+      spectralFlux: flux,
+      spectralFlatness: flatness,
+      spectralRolloff: rolloff,
+      dynamicRange: dynamicRange,
+      onsetPulse: onsetPulse,
+      bassPulse: bassPulse,
+      midPulse: midPulse,
+      treblePulse: treblePulse,
       frequencyBins: bins,
       waveform: downsample(window, count: 128),
-      isSilent: rms < 0.008 && bass < 0.012 && mid < 0.012
+      bands: bands,
+      bandEnvelopes: bandEnvelopes,
+      bandPeaks: bandPeaks,
+      isSilent: rms < 0.008 && energy < 0.012 && bass < 0.012
     )
   }
 
@@ -284,6 +367,18 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     return values.reduce(0, +) / Double(values.count)
   }
 
+  private func makeLogBands(_ bins: [Double], count: Int) -> [Double] {
+    let maximumFrequency = max(minimumBandFrequency + 1, configuredSampleRate / 2)
+    let logMinimum = log10(minimumBandFrequency)
+    let logMaximum = log10(maximumFrequency)
+
+    return (0..<count).map { band in
+      let startFrequency = pow(10, logMinimum + (Double(band) / Double(count)) * (logMaximum - logMinimum))
+      let endFrequency = pow(10, logMinimum + (Double(band + 1) / Double(count)) * (logMaximum - logMinimum))
+      return averageBand(bins, minFrequency: startFrequency, maxFrequency: endFrequency)
+    }
+  }
+
   private func spectralCentroid(_ bins: [Double]) -> Double {
     var weighted = 0.0
     var total = 0.0
@@ -298,6 +393,118 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
     }
 
     return clamp(weighted / total / Double(bins.count - 1))
+  }
+
+  private func spectralFlux(_ current: [Double], _ previous: [Double]) -> Double {
+    guard current.count == previous.count else {
+      return 0
+    }
+
+    var sum = 0.0
+    for index in 0..<current.count {
+      sum += max(0, current[index] - previous[index])
+    }
+
+    return clamp((sum / Double(max(1, current.count))) * 3.2)
+  }
+
+  private func spectralFlatness(_ bins: [Double]) -> Double {
+    guard !bins.isEmpty else {
+      return 0
+    }
+
+    let epsilon = 0.000_001
+    var logSum = 0.0
+    var arithmeticSum = 0.0
+
+    for bin in bins {
+      let magnitude = max(epsilon, bin)
+      logSum += log(magnitude)
+      arithmeticSum += magnitude
+    }
+
+    let geometricMean = exp(logSum / Double(bins.count))
+    let arithmeticMean = arithmeticSum / Double(bins.count)
+    return arithmeticMean <= epsilon ? 0 : clamp(geometricMean / arithmeticMean)
+  }
+
+  private func spectralRolloff(_ bins: [Double], threshold: Double) -> Double {
+    let total = bins.reduce(0, +)
+    guard total > 0, !bins.isEmpty else {
+      return 0
+    }
+
+    let target = total * threshold
+    var running = 0.0
+    for index in 0..<bins.count {
+      running += bins[index]
+      if running >= target {
+        return clamp(Double(index) / Double(max(1, bins.count - 1)))
+      }
+    }
+
+    return 1
+  }
+
+  private func calculateDynamicRange(_ window: [Double], rms: Double) -> Double {
+    let peak = window.reduce(0.0) { max($0, abs($1)) }
+    return clamp((peak - rms) * 1.7)
+  }
+
+  private func adaptivePulse(
+    _ value: Double,
+    history: [Double],
+    previousPulse: Double,
+    floor: Double,
+    sensitivity: Double,
+    spreadScale: Double
+  ) -> Double {
+    guard !history.isEmpty else {
+      return 0
+    }
+
+    let baseline = average(history)
+    let spread = sqrt(variance(history, mean: baseline))
+    let threshold = baseline + spread * spreadScale + floor
+    let lift = max(0, value - threshold)
+    let normalizedLift = lift / max(floor * 1.6, spread + floor)
+    return clamp(normalizedLift * sensitivity + previousPulse * 0.58)
+  }
+
+  private func updateBandEnvelopeState(_ bands: [Double]) {
+    for index in 0..<min(bands.count, bandEnvelopes.count) {
+      let band = bands[index]
+      let envelope = bandEnvelopes[index]
+      let attack = band > envelope ? 0.58 : 0.13
+      bandEnvelopes[index] = lerp(envelope, band, attack)
+      bandPeaks[index] = max(band, bandPeaks[index] * 0.965)
+    }
+  }
+
+  private func pushHistory(_ history: inout [Double], _ value: Double) {
+    history.append(value)
+    if history.count > historySize {
+      history.removeFirst(history.count - historySize)
+    }
+  }
+
+  private func average(_ values: [Double]) -> Double {
+    guard !values.isEmpty else {
+      return 0
+    }
+
+    return values.reduce(0, +) / Double(values.count)
+  }
+
+  private func variance(_ values: [Double], mean: Double) -> Double {
+    guard !values.isEmpty else {
+      return 0
+    }
+
+    return values.reduce(0) { partial, value in
+      let delta = value - mean
+      return partial + delta * delta
+    } / Double(values.count)
   }
 
   private func downsample(_ values: [Double], count: Int) -> [Double] {
@@ -319,8 +526,20 @@ private final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelega
       treble: 0,
       centroid: 0,
       beatPulse: 0,
+      energy: 0,
+      spectralFlux: 0,
+      spectralFlatness: 0,
+      spectralRolloff: 0,
+      dynamicRange: 0,
+      onsetPulse: 0,
+      bassPulse: 0,
+      midPulse: 0,
+      treblePulse: 0,
       frequencyBins: Array(repeating: 0, count: 96),
       waveform: Array(repeating: 0, count: 128),
+      bands: Array(repeating: 0, count: visualBandCount),
+      bandEnvelopes: Array(repeating: 0, count: visualBandCount),
+      bandPeaks: Array(repeating: 0, count: visualBandCount),
       isSilent: true
     )
   }
@@ -344,6 +563,10 @@ private func readableError(_ error: Error) -> String {
   }
 
   return error.localizedDescription
+}
+
+private func lerp(_ from: Double, _ to: Double, _ alpha: Double) -> Double {
+  from + (to - from) * clamp(alpha)
 }
 
 private func clamp(_ value: Double, min: Double = 0, max: Double = 1) -> Double {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getPalette, palettes, presets } from './options';
+import { createPreset } from './presets';
 
 describe('visualization options', () => {
   it('keeps the persisted preset ids compatible while upgrading their rendering', () => {
@@ -20,6 +21,16 @@ describe('visualization options', () => {
       expect(palette.glow).toMatch(/^#/);
       expect(palette.primary).toMatch(/^#/);
       expect(palette.secondary).toMatch(/^#/);
+    }
+  });
+
+  it('creates every persisted preset through the preset factory', () => {
+    const palette = getPalette('aurora');
+
+    for (const presetOption of presets) {
+      const preset = createPreset(presetOption.id, palette);
+      expect(preset.id).toBe(presetOption.id);
+      expect(preset.name).toBeTruthy();
     }
   });
 });

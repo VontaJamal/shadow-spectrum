@@ -1,4 +1,4 @@
-import { FeatureExtractor } from './featureExtractor';
+import { FeatureExtractor, VISUAL_BAND_COUNT } from './featureExtractor';
 import { UnsupportedCaptureError, createAudioSource, transitionSourceStatus } from './sources';
 import type {
   AnalysisOptions,
@@ -198,8 +198,20 @@ interface NativeFeaturePayload {
     treble: number;
     centroid: number;
     beatPulse: number;
+    energy?: number;
+    spectralFlux?: number;
+    spectralFlatness?: number;
+    spectralRolloff?: number;
+    dynamicRange?: number;
+    onsetPulse?: number;
+    bassPulse?: number;
+    midPulse?: number;
+    treblePulse?: number;
     frequencyBins: number[];
     waveform: number[];
+    bands?: number[];
+    bandEnvelopes?: number[];
+    bandPeaks?: number[];
     isSilent: boolean;
   };
 }
@@ -210,13 +222,22 @@ interface NativeStatusPayload {
   message: string;
 }
 
-function deserializeNativeFeatures(payload: unknown, sensitivity: number): AudioFeatures | null {
+export function deserializeNativeFeatures(payload: unknown, sensitivity: number): AudioFeatures | null {
   if (!isNativeFeaturePayload(payload)) {
     return null;
   }
 
   const scale = (value: number): number => Math.min(1, Math.max(0, value * sensitivity));
   const scaleWaveform = (value: number): number => Math.min(1, Math.max(-1, value * sensitivity));
+  const frequencyBins = Float32Array.from(payload.features.frequencyBins.map(scale));
+  const waveform = Float32Array.from(payload.features.waveform.map(scaleWaveform));
+  const bands = toScaledFloatArray(payload.features.bands, scale, VISUAL_BAND_COUNT, () =>
+    resampleToBands(frequencyBins, VISUAL_BAND_COUNT)
+  );
+  const energy = scale(
+    payload.features.energy ??
+      Math.min(1, payload.features.rms * 1.2 + averageArray(bands) * 0.68 + payload.features.bass * 0.28)
+  );
 
   return {
     rms: scale(payload.features.rms),
@@ -225,8 +246,20 @@ function deserializeNativeFeatures(payload: unknown, sensitivity: number): Audio
     treble: scale(payload.features.treble),
     centroid: scale(payload.features.centroid),
     beatPulse: scale(payload.features.beatPulse),
-    frequencyBins: Float32Array.from(payload.features.frequencyBins.map(scale)),
-    waveform: Float32Array.from(payload.features.waveform.map(scaleWaveform)),
+    energy,
+    spectralFlux: scale(payload.features.spectralFlux ?? 0),
+    spectralFlatness: scale(payload.features.spectralFlatness ?? 0),
+    spectralRolloff: scale(payload.features.spectralRolloff ?? payload.features.centroid),
+    dynamicRange: scale(payload.features.dynamicRange ?? Math.min(1, payload.features.rms * 1.6)),
+    onsetPulse: scale(payload.features.onsetPulse ?? payload.features.beatPulse),
+    bassPulse: scale(payload.features.bassPulse ?? payload.features.beatPulse),
+    midPulse: scale(payload.features.midPulse ?? 0),
+    treblePulse: scale(payload.features.treblePulse ?? 0),
+    frequencyBins,
+    waveform,
+    bands,
+    bandEnvelopes: toScaledFloatArray(payload.features.bandEnvelopes, scale, VISUAL_BAND_COUNT, () => bands),
+    bandPeaks: toScaledFloatArray(payload.features.bandPeaks, scale, VISUAL_BAND_COUNT, () => bands),
     isSilent: payload.features.isSilent
   };
 }
@@ -258,4 +291,52 @@ function isNativeFeaturePayload(payload: unknown): payload is NativeFeaturePaylo
     Array.isArray(features.frequencyBins) &&
     Array.isArray(features.waveform)
   );
+}
+
+function toScaledFloatArray(
+  values: number[] | undefined,
+  scale: (value: number) => number,
+  fallbackLength: number,
+  fallback: () => Float32Array
+): Float32Array {
+  if (!Array.isArray(values)) {
+    return new Float32Array(fallback());
+  }
+
+  const output = new Float32Array(fallbackLength);
+  for (let index = 0; index < fallbackLength; index += 1) {
+    output[index] = scale(values[index] ?? 0);
+  }
+  return output;
+}
+
+function resampleToBands(values: Float32Array, count: number): Float32Array {
+  const output = new Float32Array(count);
+  if (values.length === 0) {
+    return output;
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    const start = Math.floor((index / count) * values.length);
+    const end = Math.max(start + 1, Math.floor(((index + 1) / count) * values.length));
+    let sum = 0;
+    for (let source = start; source < end; source += 1) {
+      sum += values[source] ?? 0;
+    }
+    output[index] = sum / Math.max(1, end - start);
+  }
+
+  return output;
+}
+
+function averageArray(values: ArrayLike<number>): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  let sum = 0;
+  for (let index = 0; index < values.length; index += 1) {
+    sum += values[index];
+  }
+  return sum / values.length;
 }

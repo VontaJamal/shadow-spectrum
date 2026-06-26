@@ -122,6 +122,19 @@ export function ControlOverlay({
               </select>
             </label>
 
+            <label className="control-field toggle-field">
+              <span>Auto-cycle</span>
+              <span className="toggle-row">
+                <input
+                  aria-label="Auto-cycle"
+                  checked={settings.autoCycle}
+                  onChange={(event) => onSettingsChange({ autoCycle: event.target.checked })}
+                  type="checkbox"
+                />
+                <span aria-hidden="true" className="toggle-switch" />
+              </span>
+            </label>
+
             <label className="control-field">
               <span>Smoothing</span>
               <span className="slider">
