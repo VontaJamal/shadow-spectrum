@@ -44,4 +44,19 @@ describe('usePersistedSettings', () => {
       autoCycle: true
     });
   });
+
+  it('migrates the removed analyzer preset to liquid veil', () => {
+    window.localStorage.setItem(
+      'test-visualizer-settings',
+      JSON.stringify({ presetId: 'neon-analyzer', autoCycle: true })
+    );
+
+    render(<Harness />);
+
+    expect(screen.getByTestId('settings')).toHaveTextContent('liquid-veil:true');
+    expect(JSON.parse(window.localStorage.getItem('test-visualizer-settings') ?? '{}')).toEqual({
+      presetId: 'liquid-veil',
+      autoCycle: true
+    });
+  });
 });

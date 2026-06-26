@@ -7,8 +7,8 @@ export function createPreset(id: PresetId, palette: Palette): VisualizerPreset {
     return new ElectricFoldPreset(palette);
   }
 
-  if (id === 'neon-analyzer') {
-    return new NeonAnalyzerPreset(palette);
+  if (id === 'liquid-veil') {
+    return new LiquidVeilPreset(palette);
   }
 
   if (id === 'plasma-bowl') {
@@ -135,9 +135,12 @@ abstract class PresetBase implements VisualizerPreset {
 abstract class ShaderStagePreset extends PresetBase {
   protected stage?: THREE.Mesh;
   protected material?: THREE.ShaderMaterial;
+  protected evolutionSeed = 0.41;
+  private evolution?: OrganicEvolution;
   private time = 0;
 
   protected buildShaderStage(fragmentShader: string): void {
+    this.evolution = new OrganicEvolution(this.evolutionSeed);
     this.material = new THREE.ShaderMaterial({
       blending: THREE.AdditiveBlending,
       depthTest: false,
@@ -172,15 +175,95 @@ abstract class ShaderStagePreset extends PresetBase {
     const signal = this.readSignal(features, deltaMs);
     this.time += deltaMs * 0.001;
     if (this.material) {
-      updateCommonUniforms(this.material, signal, this.time);
+      const evolution = this.evolution?.update(signal, deltaMs) ?? initialEvolutionFrame;
+      updateCommonUniforms(this.material, signal, evolution, this.time);
     }
     return signal;
+  }
+}
+
+interface EvolutionFrame {
+  seed: number;
+  morph: number;
+  drift: THREE.Vector2;
+  event: number;
+  flow: number;
+  variant: number;
+}
+
+const initialEvolutionFrame: EvolutionFrame = {
+  seed: 0,
+  morph: 0,
+  drift: new THREE.Vector2(0, 0),
+  event: 0,
+  flow: 0,
+  variant: 0
+};
+
+class OrganicEvolution {
+  private readonly random: () => number;
+  private drift = new THREE.Vector2(0, 0);
+  private targetDrift = new THREE.Vector2(0, 0);
+  private event = 0;
+  private flow = 0;
+  private morphPhase = 0;
+  private variant = 0;
+  private elapsedMs = 0;
+  private nextChangeMs = 1_800;
+  private cooldownMs = 0;
+
+  constructor(private readonly seed: number) {
+    this.random = seededRandom(Math.round(seed * 100_000) + 73);
+    this.variant = this.random();
+    this.pickTarget();
+  }
+
+  update(signal: VisualSignal, deltaMs: number): EvolutionFrame {
+    const delta = clamp(deltaMs, 0, 90);
+    this.elapsedMs += delta;
+    this.cooldownMs = Math.max(0, this.cooldownMs - delta);
+
+    if (this.elapsedMs >= this.nextChangeMs || (signal.onset > 0.42 && this.cooldownMs === 0)) {
+      this.pickTarget();
+      this.variant = this.random();
+      this.event = Math.max(this.event, 0.72 + signal.onset * 0.28);
+      this.cooldownMs = 820 + this.random() * 920;
+      this.nextChangeMs = this.elapsedMs + 2_600 + this.random() * 5_400;
+    }
+
+    const driftAlpha = 1 - Math.exp(-delta / (1_350 - signal.energy * 520));
+    this.drift.lerp(this.targetDrift, clamp(driftAlpha, 0.01, 0.12));
+    this.event *= Math.exp(-delta / 620);
+    this.flow += delta * 0.001 * (0.09 + signal.energy * 0.24 + signal.flux * 0.18 + this.event * 0.08);
+    this.morphPhase += delta * 0.001 * (0.05 + signal.flatness * 0.08 + signal.rolloff * 0.04);
+
+    const morph =
+      0.5 +
+      Math.sin(this.morphPhase + this.seed * 8.0) * 0.28 +
+      Math.sin(this.flow * 0.37 + this.variant * 6.283) * 0.18 +
+      this.event * 0.18;
+
+    return {
+      seed: this.seed,
+      morph: clamp(morph),
+      drift: this.drift,
+      event: clamp(this.event),
+      flow: this.flow,
+      variant: this.variant
+    };
+  }
+
+  private pickTarget(): void {
+    const angle = this.random() * Math.PI * 2;
+    const radius = 0.08 + this.random() * 0.34;
+    this.targetDrift.set(Math.cos(angle) * radius, Math.sin(angle) * radius * 0.72);
   }
 }
 
 class VortexEyePreset extends ShaderStagePreset {
   id = 'vortex-eye' as const;
   name = 'Vortex Eye';
+  protected evolutionSeed = 0.13;
 
   protected build(): void {
     this.buildShaderStage(vortexEyeFragmentShader);
@@ -195,6 +278,7 @@ class VortexEyePreset extends ShaderStagePreset {
 class ElectricFoldPreset extends ShaderStagePreset {
   id = 'electric-fold' as const;
   name = 'Electric Fold';
+  protected evolutionSeed = 0.51;
 
   protected build(): void {
     this.buildShaderStage(electricFoldFragmentShader);
@@ -206,156 +290,27 @@ class ElectricFoldPreset extends ShaderStagePreset {
   }
 }
 
-interface AnalyzerBar {
-  bar: THREE.Mesh;
-  cap: THREE.Mesh;
-  index: number;
-  baseColor: THREE.Color;
-}
-
-interface AnalyzerDune {
-  mesh: THREE.Mesh;
-  y: number;
-  thickness: number;
-  opacity: number;
-  phase: number;
-}
-
-class NeonAnalyzerPreset extends ShaderStagePreset {
-  id = 'neon-analyzer' as const;
-  name = 'Neon Analyzer';
-  private bars: AnalyzerBar[] = [];
-  private dunes: AnalyzerDune[] = [];
+class LiquidVeilPreset extends ShaderStagePreset {
+  id = 'liquid-veil' as const;
+  name = 'Liquid Veil';
+  protected evolutionSeed = 0.77;
 
   protected build(): void {
-    this.buildShaderStage(neonAnalyzerFragmentShader);
-
-    const count = 96;
-    const barGeometry = new THREE.BoxGeometry(0.072, 1, 0.08);
-    const capGeometry = new THREE.BoxGeometry(0.095, 0.055, 0.1);
-    const low = new THREE.Color('#74ff00');
-    const mid = new THREE.Color(this.palette.primary);
-    const high = new THREE.Color('#fff35c');
-
-    for (let index = 0; index < count; index += 1) {
-      const progress = index / Math.max(1, count - 1);
-      const color = progress < 0.55 ? low.clone().lerp(mid, progress / 0.55) : mid.clone().lerp(high, (progress - 0.55) / 0.45);
-      const barMaterial = new THREE.MeshBasicMaterial({
-        blending: THREE.AdditiveBlending,
-        color,
-        depthWrite: false,
-        opacity: 0.74,
-        transparent: true
-      });
-      const capMaterial = new THREE.MeshBasicMaterial({
-        blending: THREE.AdditiveBlending,
-        color: high.clone().lerp(color, 0.45),
-        depthWrite: false,
-        opacity: 0.62,
-        transparent: true
-      });
-      const bar = new THREE.Mesh(barGeometry.clone(), barMaterial);
-      const cap = new THREE.Mesh(capGeometry.clone(), capMaterial);
-      this.bars.push({ bar, cap, index, baseColor: color });
-      this.group.add(bar, cap);
-    }
-
-    const duneColors = [
-      ['#1e5bff', '#161bff'],
-      ['#ffb34d', '#2c5fff'],
-      [this.palette.primary, this.palette.hot]
-    ];
-    for (let index = 0; index < duneColors.length; index += 1) {
-      const geometry = createStripGeometry(220, false);
-      fillStripColors(geometry, duneColors[index][0], duneColors[index][1]);
-      const material = new THREE.MeshBasicMaterial({
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        opacity: 0.28 - index * 0.045,
-        side: THREE.DoubleSide,
-        transparent: true,
-        vertexColors: true
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.renderOrder = -1 + index;
-      this.dunes.push({
-        mesh,
-        y: -0.25 + index * 0.38,
-        thickness: 0.18 + index * 0.04,
-        opacity: 0.28 - index * 0.045,
-        phase: index * 0.19
-      });
-      this.group.add(mesh);
-    }
+    this.buildShaderStage(liquidVeilFragmentShader);
   }
 
   update(features: AudioFeatures, deltaMs: number): void {
     const signal = this.updateShader(features, deltaMs);
     const time = this.material?.uniforms.uTime.value ?? 0;
-    const span = this.size.width < 720 ? 10.0 : 12.2;
-    const floor = -3.05;
-    const hot = new THREE.Color('#fff35c');
-
-    for (const entry of this.bars) {
-      const progress = entry.index / Math.max(1, this.bars.length - 1);
-      const band = sampleFrequency(features.bandEnvelopes, progress, 0.04);
-      const peak = sampleFrequency(features.bandPeaks, progress, band);
-      const bandPulse = progress < 0.22 ? signal.bassPulse : progress < 0.68 ? signal.midPulse : signal.treblePulse;
-      const idleLilt = Math.sin(time * 1.8 + progress * Math.PI * 16) * 0.08;
-      const height = clamp(0.18 + band * 4.9 + peak * 0.82 + bandPulse * 0.74 + signal.onset * 0.28 + idleLilt, 0.08, 5.7);
-      const x = (progress - 0.5) * span;
-      const z = -0.2 + Math.sin(progress * Math.PI * 5 + time * 0.6) * (0.035 + signal.flatness * 0.08);
-
-      entry.bar.position.set(x, floor + height / 2, z);
-      entry.bar.scale.set(1 + bandPulse * 0.18, height, 1 + peak * 0.36);
-      entry.cap.position.set(x, floor + height + 0.08 + peak * 0.42, z + 0.045);
-      entry.cap.scale.set(1 + peak * 0.7 + bandPulse * 0.18, 1, 1);
-
-      const barMaterial = entry.bar.material as THREE.MeshBasicMaterial;
-      const capMaterial = entry.cap.material as THREE.MeshBasicMaterial;
-      barMaterial.color.copy(entry.baseColor).lerp(hot, peak * 0.35 + bandPulse * 0.18);
-      barMaterial.opacity = 0.22 + band * 0.7 + peak * 0.34 + signal.energy * 0.18 + bandPulse * 0.18;
-      capMaterial.opacity = 0.12 + peak * 0.42 + bandPulse * 0.28 + signal.onset * 0.18;
-    }
-
-    for (const dune of this.dunes) {
-      const positions = dune.mesh.geometry.attributes.position.array as Float32Array;
-      const pointCount = positions.length / 6;
-      for (let point = 0; point < pointCount; point += 1) {
-        const progress = point / Math.max(1, pointCount - 1);
-        const offset = point * 6;
-        const band = sampleFrequency(features.bandEnvelopes, progress, 0.04);
-        const peak = sampleFrequency(features.bandPeaks, progress, band);
-        const waveform = sampleWaveform(features.waveform, positiveModulo(progress + dune.phase, 1), 0);
-        const x = (progress - 0.5) * span;
-        const silhouette =
-          dune.y +
-          Math.pow(band, 0.72) * (1.15 + signal.energy * 0.8) +
-          peak * 0.42 +
-          waveform * (0.22 + signal.dynamics * 0.38) +
-          Math.sin(progress * Math.PI * (5 + dune.phase * 8) + time * (0.9 + signal.flux)) * (0.05 + signal.flatness * 0.12);
-        const thickness = dune.thickness * (1 + signal.onset * 0.45) + peak * 0.03;
-
-        positions[offset] = x;
-        positions[offset + 1] = silhouette + thickness;
-        positions[offset + 2] = -0.48 - dune.phase;
-        positions[offset + 3] = x;
-        positions[offset + 4] = dune.y - thickness * 0.7;
-        positions[offset + 5] = -0.55 - dune.phase;
-      }
-      dune.mesh.geometry.attributes.position.needsUpdate = true;
-      const material = dune.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = dune.opacity * (0.58 + signal.energy * 0.85 + signal.flux * 0.5 + signal.onset * 0.5);
-    }
-
-    this.group.rotation.x = Math.sin(time * 0.05) * 0.025;
-    this.group.rotation.y = Math.sin(time * 0.07) * 0.035 + signal.centroid * 0.02;
+    this.group.rotation.z = Math.sin(time * 0.045) * (0.018 + signal.flatness * 0.02);
+    this.group.scale.setScalar(1 + signal.onset * 0.018 + signal.midPulse * 0.012);
   }
 }
 
 class PlasmaBowlPreset extends ShaderStagePreset {
   id = 'plasma-bowl' as const;
   name = 'Plasma Bowl';
+  protected evolutionSeed = 0.92;
   private sparks?: THREE.Points;
   private sparkBase = new Float32Array(0);
   private sparkSeeds = new Float32Array(0);
@@ -469,6 +424,12 @@ const shaderPrelude = `
   uniform float uBassPulse;
   uniform float uMidPulse;
   uniform float uTreblePulse;
+  uniform float uSeed;
+  uniform float uMorph;
+  uniform float uEvent;
+  uniform float uFlow;
+  uniform float uVariant;
+  uniform vec2 uDrift;
   uniform vec3 uColorA;
   uniform vec3 uColorB;
   uniform vec3 uColorC;
@@ -518,20 +479,22 @@ const vortexEyeFragmentShader = `
   ${shaderPrelude}
 
   void main() {
-    vec2 p = vUv - 0.5;
+    vec2 p = vUv - 0.5 - uDrift * 0.42;
     p.x *= uAspect;
     float r = length(p);
     float a = atan(p.y, p.x);
     float pulse = uOnset * 0.8 + uBassPulse * 0.55 + uEnergy * 0.35;
-    float twist = a + 1.65 / (r + 0.065) + uTime * (0.24 + uFlux * 0.42) + sin(r * 8.0 - uTime) * 0.22;
-    float cloudy = fbm(vec2(cos(twist), sin(twist)) * (2.2 + uFlatness * 3.2) + r * 8.0 - uTime * 0.38);
-    float rings = 0.5 + 0.5 * sin(r * (48.0 + uRolloff * 22.0) - uTime * (2.4 + uBass * 3.0) + cloudy * 4.0);
-    float spokes = pow(0.5 + 0.5 * sin(twist * (10.0 + uCentroid * 10.0) + r * 7.0 + uTime * 1.2), 4.0);
+    float direction = mix(-1.0, 1.0, step(0.5, uVariant));
+    float aperture = 0.72 + uMorph * 0.34 + pulse * 0.16;
+    float twist = a * direction + (1.18 + uMorph * 0.92) / (r + 0.055) + uFlow * (2.2 + uFlux * 2.8) + sin(r * (7.0 + uMorph * 5.0) - uTime + uSeed * 9.0) * (0.15 + uEvent * 0.24);
+    float cloudy = fbm(vec2(cos(twist), sin(twist)) * (2.0 + uFlatness * 3.5 + uMorph * 1.2) + r * (7.0 + uMorph * 6.0) - uFlow * 2.1 + uSeed);
+    float rings = 0.5 + 0.5 * sin(r * (34.0 + uMorph * 42.0 + uRolloff * 18.0 + uEvent * 18.0) - uFlow * (16.0 + uBass * 12.0) + cloudy * (3.2 + uEvent * 2.0));
+    float spokes = pow(0.5 + 0.5 * sin(twist * (7.0 + uCentroid * 14.0 + uMorph * 8.0) + r * (5.0 + uEvent * 8.0) + uFlow * 5.2), 3.0 + uMorph * 2.4);
     float mask = smoothstep(0.92, 0.08, r);
     float iris = mask * (pow(rings, 5.0) * 0.68 + pow(spokes, 2.6) * 0.34 + cloudy * 0.1);
-    float halo = exp(-abs(r - (0.32 + pulse * 0.08)) * (8.0 - uEnergy * 2.2));
-    float core = smoothstep(0.21 + pulse * 0.04, 0.055, r);
-    float scan = lineGlow(p.y + sin(p.x * 4.0 + uTime) * 0.018, 0.01 + uTreblePulse * 0.018);
+    float halo = exp(-abs(r - (0.26 + aperture * 0.15 + pulse * 0.06)) * (7.0 - uEnergy * 1.9));
+    float core = smoothstep(0.16 + aperture * 0.08 + pulse * 0.05, 0.045, r);
+    float scan = lineGlow(p.y + sin(p.x * (3.4 + uMorph * 4.0) + uFlow * 4.0) * (0.012 + uEvent * 0.035), 0.008 + uTreblePulse * 0.016);
 
     vec3 cold = mix(vec3(0.02, 0.18, 0.75), vec3(0.22, 1.0, 0.9), 0.45 + uCentroid * 0.25);
     vec3 glow = mix(vec3(0.12, 0.82, 1.0), vec3(1.0, 0.98, 0.86), clamp(halo + spokes * 0.4, 0.0, 1.0));
@@ -553,16 +516,18 @@ const electricFoldFragmentShader = `
   ${shaderPrelude}
 
   void main() {
-    vec2 p = vUv - 0.5;
+    vec2 p = vUv - 0.5 - uDrift * vec2(0.36, 0.24);
     p.x *= uAspect;
     float fold = abs(p.y);
-    float n = fbm(vec2(p.x * 4.0 + uTime * 0.55, fold * 14.0 - uTime * 0.22));
+    float n = fbm(vec2(p.x * (3.0 + uMorph * 3.8) + uFlow * 2.6, fold * (10.0 + uMorph * 10.0) - uFlow * 1.2 + uVariant * 5.0));
     float jag = (noise(vec2(p.x * 58.0 + uTime * 2.4, fold * 8.0)) - 0.5) * (0.11 + uFlatness * 0.19);
-    float contour = 0.12 + sin(p.x * (4.0 + uRolloff * 3.0) + uTime * 1.1 + n * 4.0) * (0.13 + uMid * 0.22);
+    float contour = 0.09 + sin(p.x * (3.4 + uRolloff * 3.0 + uMorph * 3.2) + uFlow * 6.0 + n * (4.0 + uEvent * 5.0)) * (0.11 + uMid * 0.22 + uEvent * 0.08);
     float jaw = pow(lineGlow(fold - contour - jag, 0.012 + uOnset * 0.018), 2.7);
     float echo = pow(lineGlow(fold - contour * 1.55 + jag * 0.4, 0.018 + uEnergy * 0.018), 3.2);
-    float center = pow(lineGlow(p.y + sin(p.x * 10.0 + uTime * 1.4) * (0.025 + uFlux * 0.05), 0.009 + uTreblePulse * 0.015), 2.4);
-    float smoke = smoothstep(0.48, 0.02, fold) * fbm(p * vec2(3.0, 5.0) + uTime * vec2(0.16, -0.26));
+    float center = pow(lineGlow(p.y + sin(p.x * (7.0 + uMorph * 9.0) + uFlow * 8.0) * (0.022 + uFlux * 0.05 + uEvent * 0.03), 0.008 + uTreblePulse * 0.014), 2.25);
+    float forkSource = sin((p.x + n * 0.28) * (18.0 + uMorph * 32.0) + uFlow * 12.0 + uVariant * 8.0);
+    float forks = pow(lineGlow(abs(p.y) - abs(forkSource) * (0.12 + uEvent * 0.1) - 0.08, 0.01 + uFlatness * 0.012), 2.2);
+    float smoke = smoothstep(0.48, 0.02, fold) * fbm(p * vec2(3.0 + uMorph * 3.0, 5.0) + vec2(uFlow * 0.8, -uFlow * 1.1));
     float flash = lineGlow(length(vec2(p.x * 0.45, p.y)) - (0.08 + uOnset * 0.08), 0.025 + uFlux * 0.02);
 
     vec3 violet = vec3(0.82, 0.16, 1.0);
@@ -571,6 +536,7 @@ const electricFoldFragmentShader = `
     vec3 color = violet * pow(smoke, 8.0) * (0.025 + uEnergy * 0.08);
     color += mix(violet, white, jaw) * jaw * (2.4 + uTreble * 0.7);
     color += cyan * center * (1.15 + uTreblePulse * 1.35);
+    color += mix(cyan, violet, uMorph) * forks * (0.42 + uEvent * 0.78 + uFlux * 0.28);
     color += vec3(0.9, 0.06, 1.0) * echo * (0.52 + uMidPulse * 0.62);
     color += white * pow(flash, 4.0) * (0.06 + uOnset * 0.14);
     color *= smoothstep(1.18, 0.24, length(p));
@@ -581,27 +547,38 @@ const electricFoldFragmentShader = `
   }
 `;
 
-const neonAnalyzerFragmentShader = `
+const liquidVeilFragmentShader = `
   ${shaderPrelude}
 
   void main() {
     vec2 uv = vUv;
-    vec2 p = uv - 0.5;
+    vec2 p = uv - 0.5 - uDrift * vec2(0.28, 0.18);
     p.x *= uAspect;
-    float gridX = smoothstep(0.48, 0.5, abs(fract(uv.x * 36.0) - 0.5));
-    float scan = lineGlow(p.y - sin(p.x * 4.0 + uTime * 0.6) * 0.03, 0.012);
-    float block = step(0.72, noise(floor(vec2(uv.x * 22.0, uv.y * 12.0)) + floor(uTime * 1.8))) * smoothstep(0.18, 0.78, uv.y);
-    float field = fbm(uv * vec2(3.0, 2.0) + vec2(uTime * 0.06, -uTime * 0.04));
-    float dune = smoothstep(0.0, 0.018 + uEnergy * 0.02, (0.2 + field * 0.25 + uEnergy * 0.12) - uv.y);
+    float r = length(p);
+    float angle = atan(p.y, p.x);
+    float warpA = fbm(p * (2.1 + uMorph * 2.8) + vec2(uFlow * 0.58, -uFlow * 0.42 + uSeed * 4.0));
+    float warpB = fbm(vec2(angle * 1.7, r * (5.0 + uMorph * 5.0)) + vec2(uFlow * 0.34, uVariant * 5.0));
+    float foldA = p.y - sin(p.x * (3.4 + uMorph * 4.8) + warpA * 5.0 + uFlow * 2.8) * (0.16 + uMid * 0.22 + uEvent * 0.08);
+    float foldB = p.y + sin(p.x * (5.2 + uVariant * 5.0) - warpB * 5.6 - uFlow * 2.2) * (0.12 + uTreble * 0.2);
+    float veilA = lineGlow(foldA, 0.032 + uEnergy * 0.026 + uEvent * 0.022);
+    float veilB = lineGlow(foldB + 0.18 * sin(angle * 2.0 + uFlow), 0.046 + uFlatness * 0.034);
+    float sheetMask = smoothstep(0.92, 0.08, r + sin(angle * 3.0 + uFlow) * 0.08);
+    float sheet = pow(sheetMask * (0.12 + warpA * 0.32 + warpB * 0.18), 1.75);
+    float centerGlow = exp(-length(p - vec2(0.12 * sin(uFlow), -0.06 + uEvent * 0.08)) * (4.2 - uEvent * 0.65));
+    float edgeSparkle = pow(noise(p * 42.0 + uFlow * 3.0), 9.0) * (veilA + veilB) * (0.2 + uTreblePulse);
 
-    vec3 color = vec3(0.0);
-    color += vec3(0.0, 0.08, 0.02) * gridX * 0.12;
-    color += mix(vec3(0.02, 0.08, 0.55), vec3(0.95, 0.46, 0.14), uv.x) * dune * (0.16 + uEnergy * 0.22);
-    color += vec3(0.2, 1.0, 0.12) * block * (0.05 + uFlux * 0.16);
-    color += uColorA * scan * (0.18 + uTreblePulse * 0.22);
-    color = max(color - vec3(0.012), vec3(0.0));
+    vec3 cyan = vec3(0.18, 1.0, 0.9);
+    vec3 violet = vec3(0.72, 0.16, 1.0);
+    vec3 white = vec3(0.95, 1.0, 0.95);
+    vec3 color = cyan * veilA * (0.55 + uEnergy * 0.45);
+    color += violet * veilB * (0.42 + uMorph * 0.35);
+    color += mix(cyan, violet, warpB) * sheet * (0.18 + uMidPulse * 0.18);
+    color += white * pow(centerGlow, 3.2) * (0.06 + uOnset * 0.16);
+    color += mix(white, violet, uVariant) * edgeSparkle;
+    color *= smoothstep(1.1, 0.22, r);
+    color = max(color - vec3(0.045), vec3(0.0));
 
-    gl_FragColor = luminous(color, 1.2);
+    gl_FragColor = luminous(pow(color, vec3(0.78)), 1.25);
   }
 `;
 
@@ -609,18 +586,19 @@ const plasmaBowlFragmentShader = `
   ${shaderPrelude}
 
   void main() {
-    vec2 p = vUv - 0.5;
+    vec2 p = vUv - 0.5 - uDrift * vec2(0.36, 0.18);
     p.x *= uAspect;
     float r = length(p);
     float a = atan(p.y, p.x);
-    float base = smoothstep(0.52, 0.08, abs(p.y + 0.39) + abs(p.x) * 0.28);
-    float bowl = lineGlow(length(vec2(p.x * 0.82, p.y + 0.43)) - (0.36 + uBassPulse * 0.05), 0.035 + uEnergy * 0.025);
-    float flameNoise = fbm(vec2(p.x * 4.8 + sin(a * 3.0), (p.y + 0.5) * 5.2 - uTime * (0.9 + uEnergy)));
-    float flame = smoothstep(0.48, 0.04, abs(p.x) + max(p.y + 0.28, 0.0) * 0.72) * flameNoise;
+    float base = smoothstep(0.52, 0.08, abs(p.y + 0.39 + uDrift.y * 0.18) + abs(p.x) * (0.22 + uMorph * 0.16));
+    float bowl = lineGlow(length(vec2(p.x * (0.68 + uMorph * 0.26), p.y + 0.43)) - (0.33 + uBassPulse * 0.05 + uEvent * 0.04), 0.032 + uEnergy * 0.025);
+    float flameNoise = fbm(vec2(p.x * (3.8 + uMorph * 4.0) + sin(a * (2.0 + uVariant * 5.0)), (p.y + 0.5) * (4.5 + uMorph * 3.0) - uFlow * (6.0 + uEnergy * 3.0)));
+    float tongueSplit = sin(a * (8.0 + uMorph * 12.0) + uFlow * 8.0 + flameNoise * 4.0);
+    float flame = smoothstep(0.5, 0.035, abs(p.x + tongueSplit * (0.04 + uEvent * 0.06)) + max(p.y + 0.28, 0.0) * (0.62 + uMorph * 0.36)) * flameNoise;
     flame *= smoothstep(-0.12, 0.42, p.y + 0.54);
-    float sparks = pow(noise(vec2(a * 9.0 + uTime * 1.7, r * 16.0 - uTime * 2.2)), 7.0) * smoothstep(0.68, 0.04, r);
-    float hotCore = exp(-length(vec2(p.x * 1.25, p.y + 0.38)) * (5.2 - uOnset * 0.8));
-    float blueLip = lineGlow(p.y + 0.44 + sin(p.x * 10.0 + uTime) * 0.025, 0.035 + uBassPulse * 0.025);
+    float sparks = pow(noise(vec2(a * (8.0 + uMorph * 7.0) + uFlow * 7.0, r * 17.0 - uFlow * 9.0)), 7.0) * smoothstep(0.72, 0.04, r);
+    float hotCore = exp(-length(vec2(p.x * (1.05 + uMorph * 0.5), p.y + 0.38)) * (4.7 - uOnset * 0.9 - uEvent * 0.4));
+    float blueLip = lineGlow(p.y + 0.44 + sin(p.x * (8.0 + uMorph * 6.0) + uFlow * 4.0) * (0.02 + uEvent * 0.035), 0.032 + uBassPulse * 0.025);
 
     vec3 red = vec3(1.0, 0.1, 0.02);
     vec3 gold = vec3(1.0, 0.92, 0.15);
@@ -656,6 +634,12 @@ interface CommonUniforms extends Record<string, THREE.IUniform> {
   uBassPulse: { value: number };
   uMidPulse: { value: number };
   uTreblePulse: { value: number };
+  uSeed: { value: number };
+  uMorph: { value: number };
+  uDrift: { value: THREE.Vector2 };
+  uEvent: { value: number };
+  uFlow: { value: number };
+  uVariant: { value: number };
   uColorA: { value: THREE.Color };
   uColorB: { value: THREE.Color };
   uColorC: { value: THREE.Color };
@@ -680,6 +664,12 @@ function createCommonUniforms(palette: Palette): CommonUniforms {
     uBassPulse: { value: 0 },
     uMidPulse: { value: 0 },
     uTreblePulse: { value: 0 },
+    uSeed: { value: 0 },
+    uMorph: { value: 0 },
+    uDrift: { value: new THREE.Vector2(0, 0) },
+    uEvent: { value: 0 },
+    uFlow: { value: 0 },
+    uVariant: { value: 0 },
     uColorA: { value: new THREE.Color(palette.primary) },
     uColorB: { value: new THREE.Color(palette.secondary) },
     uColorC: { value: new THREE.Color(palette.hot) },
@@ -688,7 +678,7 @@ function createCommonUniforms(palette: Palette): CommonUniforms {
   };
 }
 
-function updateCommonUniforms(material: THREE.ShaderMaterial, signal: VisualSignal, time: number): void {
+function updateCommonUniforms(material: THREE.ShaderMaterial, signal: VisualSignal, evolution: EvolutionFrame, time: number): void {
   material.uniforms.uTime.value = time;
   material.uniforms.uEnergy.value = signal.energy;
   material.uniforms.uBass.value = signal.bass;
@@ -703,65 +693,12 @@ function updateCommonUniforms(material: THREE.ShaderMaterial, signal: VisualSign
   material.uniforms.uBassPulse.value = signal.bassPulse;
   material.uniforms.uMidPulse.value = signal.midPulse;
   material.uniforms.uTreblePulse.value = signal.treblePulse;
-}
-
-function createStripGeometry(pointCount: number, closed: boolean): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pointCount * 2 * 3), 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pointCount * 2 * 3), 3));
-
-  const indices: number[] = [];
-  const segmentCount = closed ? pointCount : pointCount - 1;
-  for (let index = 0; index < segmentCount; index += 1) {
-    const next = (index + 1) % pointCount;
-    const a = index * 2;
-    const b = a + 1;
-    const c = next * 2;
-    const d = c + 1;
-    indices.push(a, c, b, b, c, d);
-  }
-
-  geometry.setIndex(indices);
-  return geometry;
-}
-
-function fillStripColors(geometry: THREE.BufferGeometry, start: string, end: string): void {
-  const colors = geometry.attributes.color.array as Float32Array;
-  const startColor = new THREE.Color(start);
-  const endColor = new THREE.Color(end);
-  const pointCount = colors.length / 6;
-
-  for (let index = 0; index < pointCount; index += 1) {
-    const progress = index / Math.max(1, pointCount - 1);
-    const color = startColor.clone().lerp(endColor, progress);
-    const offset = index * 6;
-    colors[offset] = color.r;
-    colors[offset + 1] = color.g;
-    colors[offset + 2] = color.b;
-    colors[offset + 3] = color.r;
-    colors[offset + 4] = color.g;
-    colors[offset + 5] = color.b;
-  }
-
-  geometry.attributes.color.needsUpdate = true;
-}
-
-function sampleFrequency(bins: Float32Array, progress: number, fallback: number): number {
-  if (bins.length === 0) {
-    return fallback;
-  }
-
-  const index = clamp(Math.round(progress * (bins.length - 1)), 0, bins.length - 1);
-  return bins[index] ?? fallback;
-}
-
-function sampleWaveform(waveform: Float32Array, progress: number, fallback: number): number {
-  if (waveform.length === 0) {
-    return fallback * 0.08;
-  }
-
-  const index = clamp(Math.round(progress * (waveform.length - 1)), 0, waveform.length - 1);
-  return waveform[index] ?? fallback;
+  material.uniforms.uSeed.value = evolution.seed;
+  material.uniforms.uMorph.value = evolution.morph;
+  material.uniforms.uDrift.value.copy(evolution.drift);
+  material.uniforms.uEvent.value = evolution.event;
+  material.uniforms.uFlow.value = evolution.flow;
+  material.uniforms.uVariant.value = evolution.variant;
 }
 
 function positiveModulo(value: number, divisor: number): number {

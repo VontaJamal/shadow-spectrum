@@ -71,10 +71,10 @@ describe('ControlOverlay', () => {
     );
 
     await user.selectOptions(screen.getByLabelText(/source/i), 'microphone');
-    await user.selectOptions(screen.getByLabelText(/preset/i), 'neon-analyzer');
+    await user.selectOptions(screen.getByLabelText(/preset/i), 'liquid-veil');
 
     expect(onSettingsChange).toHaveBeenCalledWith({ sourceMode: 'microphone' });
-    expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'neon-analyzer' });
+    expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-veil' });
   });
 
   it('persists auto-cycle changes through the settings callback', async () => {

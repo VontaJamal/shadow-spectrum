@@ -52,7 +52,7 @@ test('launches the Electron app and renders a nonblank visualizer', async () => 
     await page.getByLabel('Toggle fullscreen').click();
     await page.getByLabel('Auto-cycle').check();
     await expect(page.getByLabel('Auto-cycle')).toBeChecked();
-    for (const preset of ['vortex-eye', 'electric-fold', 'neon-analyzer', 'plasma-bowl']) {
+    for (const preset of ['vortex-eye', 'electric-fold', 'liquid-veil', 'plasma-bowl']) {
       await page.getByLabel('Preset').selectOption(preset);
       await expect.poll(() => canvasHasPixels(page), { message: `${preset} should render nonblank canvas output` }).toBe(true);
     }
