@@ -5,25 +5,34 @@ import { createPreset } from './presets';
 describe('visualization options', () => {
   it('uses the new researched preset quartet in order', () => {
     expect(presets.map((preset) => preset.id)).toEqual([
-      'feedback-tunnel',
-      'wireframe-cascade',
-      'chromatic-flow',
-      'signal-scope'
+      'vortex-eye',
+      'electric-fold',
+      'neon-analyzer',
+      'plasma-bowl'
     ]);
     expect(presets.map((preset) => preset.label)).toEqual([
-      'Feedback Tunnel',
-      'Wireframe Cascade',
-      'Chromatic Flow',
-      'Signal Scope'
+      'Vortex Eye',
+      'Electric Fold',
+      'Neon Analyzer',
+      'Plasma Bowl'
     ]);
   });
 
   it('normalizes stale persisted preset ids to the new default', () => {
-    expect(defaultPresetId).toBe('feedback-tunnel');
-    for (const stalePresetId of ['particle-field', 'liquid-ribbons', 'spectral-bloom', 'waveform-orbit']) {
+    expect(defaultPresetId).toBe('vortex-eye');
+    for (const stalePresetId of [
+      'particle-field',
+      'liquid-ribbons',
+      'spectral-bloom',
+      'waveform-orbit',
+      'feedback-tunnel',
+      'wireframe-cascade',
+      'chromatic-flow',
+      'signal-scope'
+    ]) {
       expect(normalizePresetId(stalePresetId)).toBe(defaultPresetId);
     }
-    expect(normalizePresetId('chromatic-flow')).toBe('chromatic-flow');
+    expect(normalizePresetId('neon-analyzer')).toBe('neon-analyzer');
   });
 
   it('provides cinematic palette metadata for every palette option', () => {

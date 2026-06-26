@@ -1,13 +1,13 @@
 import type { Palette, PaletteId, PresetId } from './types';
 
 export const presets: Array<{ id: PresetId; label: string }> = [
-  { id: 'feedback-tunnel', label: 'Feedback Tunnel' },
-  { id: 'wireframe-cascade', label: 'Wireframe Cascade' },
-  { id: 'chromatic-flow', label: 'Chromatic Flow' },
-  { id: 'signal-scope', label: 'Signal Scope' }
+  { id: 'vortex-eye', label: 'Vortex Eye' },
+  { id: 'electric-fold', label: 'Electric Fold' },
+  { id: 'neon-analyzer', label: 'Neon Analyzer' },
+  { id: 'plasma-bowl', label: 'Plasma Bowl' }
 ];
 
-export const defaultPresetId: PresetId = 'feedback-tunnel';
+export const defaultPresetId: PresetId = 'vortex-eye';
 
 const presetIds = new Set<PresetId>(presets.map((preset) => preset.id));
 

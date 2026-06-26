@@ -3,19 +3,19 @@ import type { AudioFeatures } from '../audio/types';
 import type { Palette, PresetId, Size, VisualizerPreset } from './types';
 
 export function createPreset(id: PresetId, palette: Palette): VisualizerPreset {
-  if (id === 'wireframe-cascade') {
-    return new WireframeCascadePreset(palette);
+  if (id === 'electric-fold') {
+    return new ElectricFoldPreset(palette);
   }
 
-  if (id === 'chromatic-flow') {
-    return new ChromaticFlowPreset(palette);
+  if (id === 'neon-analyzer') {
+    return new NeonAnalyzerPreset(palette);
   }
 
-  if (id === 'signal-scope') {
-    return new SignalScopePreset(palette);
+  if (id === 'plasma-bowl') {
+    return new PlasmaBowlPreset(palette);
   }
 
-  return new FeedbackTunnelPreset(palette);
+  return new VortexEyePreset(palette);
 }
 
 interface VisualSignal {
@@ -132,500 +132,126 @@ abstract class PresetBase implements VisualizerPreset {
   abstract update(features: AudioFeatures, deltaMs: number): void;
 }
 
-interface TunnelRing {
-  line: THREE.LineLoop;
-  phase: number;
-  twist: number;
-  baseRadius: number;
-  opacity: number;
-}
-
-class FeedbackTunnelPreset extends PresetBase {
-  id = 'feedback-tunnel' as const;
-  name = 'Feedback Tunnel';
-  private rings: TunnelRing[] = [];
-  private starfield?: THREE.Points;
-  private starBase = new Float32Array(0);
-  private starSeeds = new Float32Array(0);
-  private starPositions?: Float32Array;
+abstract class ShaderStagePreset extends PresetBase {
+  protected stage?: THREE.Mesh;
+  protected material?: THREE.ShaderMaterial;
   private time = 0;
 
-  protected build(): void {
-    const ringCount = 58;
-    const vertices = 104;
-    const colors = [this.palette.primary, this.palette.secondary, this.palette.hot, this.palette.glow];
-
-    for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
-      const geometry = createLineGeometry(vertices);
-      fillLineColors(geometry, colors[ringIndex % colors.length], colors[(ringIndex + 1) % colors.length]);
-      const material = new THREE.LineBasicMaterial({
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        opacity: 0.08 + (ringIndex / ringCount) * 0.14,
-        transparent: true,
-        vertexColors: true
-      });
-      const line = new THREE.LineLoop(geometry, material);
-      this.rings.push({
-        line,
-        phase: ringIndex / ringCount,
-        twist: ringIndex * 0.21,
-        baseRadius: 0.72 + Math.sin(ringIndex * 0.37) * 0.08,
-        opacity: 0.08 + (ringIndex / ringCount) * 0.14
-      });
-      this.group.add(line);
-    }
-
-    const starCount = 1_400;
-    const positions = new Float32Array(starCount * 3);
-    const colorsArray = new Float32Array(starCount * 3);
-    const seeds = new Float32Array(starCount);
-    const base = new Float32Array(starCount * 3);
-    const random = seededRandom(3109);
-    const primary = new THREE.Color(this.palette.primary);
-    const secondary = new THREE.Color(this.palette.secondary);
-    const hot = new THREE.Color(this.palette.hot);
-
-    for (let index = 0; index < starCount; index += 1) {
-      const offset = index * 3;
-      const angle = random() * Math.PI * 2;
-      const radius = 0.8 + Math.pow(random(), 0.38) * 5.6;
-      const z = -7.2 + random() * 13.8;
-      const seed = random();
-      const color = primary.clone().lerp(secondary, random() * 0.68).lerp(hot, seed > 0.84 ? 0.45 : 0.06);
-
-      base[offset] = Math.cos(angle) * radius;
-      base[offset + 1] = Math.sin(angle) * radius * 0.68;
-      base[offset + 2] = z;
-      positions[offset] = base[offset];
-      positions[offset + 1] = base[offset + 1];
-      positions[offset + 2] = z;
-      colorsArray[offset] = color.r;
-      colorsArray[offset + 1] = color.g;
-      colorsArray[offset + 2] = color.b;
-      seeds[index] = seed;
-    }
-
-    const starGeometry = new THREE.BufferGeometry();
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    starGeometry.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
-    const starMaterial = new THREE.PointsMaterial({
+  protected buildShaderStage(fragmentShader: string): void {
+    this.material = new THREE.ShaderMaterial({
       blending: THREE.AdditiveBlending,
+      depthTest: false,
       depthWrite: false,
-      opacity: 0.32,
-      size: 0.024,
+      fragmentShader,
+      toneMapped: false,
       transparent: true,
-      vertexColors: true
+      uniforms: createCommonUniforms(this.palette),
+      vertexShader: fullScreenVertexShader
     });
-    this.starBase = base;
-    this.starPositions = positions;
-    this.starSeeds = seeds;
-    this.starfield = new THREE.Points(starGeometry, starMaterial);
-    this.group.add(this.starfield);
+    this.stage = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
+    this.stage.renderOrder = -10;
+    this.group.add(this.stage);
+    this.resize(this.size);
   }
 
-  update(features: AudioFeatures, deltaMs: number): void {
+  resize(size: Size): void {
+    super.resize(size);
+    if (!this.stage) {
+      return;
+    }
+
+    const aspect = size.width / Math.max(1, size.height);
+    this.stage.scale.set(24 * Math.max(1, aspect), 24, 1);
+    this.stage.position.set(0, 0, -0.4);
+    if (this.material) {
+      this.material.uniforms.uAspect.value = aspect;
+    }
+  }
+
+  protected updateShader(features: AudioFeatures, deltaMs: number): VisualSignal {
     const signal = this.readSignal(features, deltaMs);
     this.time += deltaMs * 0.001;
-    const travel = this.time * (0.105 + signal.energy * 0.13 + signal.flux * 0.09) + signal.onset * 0.08;
-    const globalTwist = this.time * (0.11 + signal.rolloff * 0.12) + signal.centroid * 0.48;
-
-    for (const ring of this.rings) {
-      const positions = ring.line.geometry.attributes.position.array as Float32Array;
-      const vertices = positions.length / 3;
-      const tunnelProgress = positiveModulo(ring.phase + travel, 1);
-      const z = -7.4 + tunnelProgress * 12.8;
-      const depthScale = 0.64 + tunnelProgress * 1.92;
-      const detail = 3 + Math.floor(signal.flatness * 5);
-
-      for (let vertex = 0; vertex < vertices; vertex += 1) {
-        const progress = vertex / vertices;
-        const offset = vertex * 3;
-        const angle = progress * Math.PI * 2;
-        const bandProgress = positiveModulo(progress + tunnelProgress * 0.45 + signal.centroid * 0.12, 1);
-        const band = sampleFrequency(features.bandEnvelopes, bandProgress, 0.03);
-        const peak = sampleFrequency(features.bandPeaks, bandProgress, band);
-        const ripple =
-          Math.sin(angle * detail + this.time * (2.0 + signal.flux * 1.7) + ring.twist) *
-          (0.08 + signal.flatness * 0.18 + peak * 0.22);
-        const beatWarp =
-          Math.sin(angle * 2 - this.time * 3.2 + tunnelProgress * Math.PI * 5) *
-          (signal.bassPulse * 0.22 + signal.onset * 0.18);
-        const radius =
-          ring.baseRadius * depthScale +
-          band * (0.42 + signal.energy * 0.34) +
-          peak * 0.28 +
-          ripple +
-          beatWarp;
-        const twist = globalTwist + ring.twist + tunnelProgress * (1.8 + signal.rolloff * 1.2);
-
-        positions[offset] = Math.cos(angle + twist) * radius * (1 + signal.bassPulse * 0.08);
-        positions[offset + 1] = Math.sin(angle - twist * 0.42) * radius * (0.66 + signal.mid * 0.12);
-        positions[offset + 2] = z + Math.sin(angle * 4 + this.time * 1.5) * (0.04 + signal.treble * 0.14);
-      }
-
-      ring.line.geometry.attributes.position.needsUpdate = true;
-      const material = ring.line.material as THREE.LineBasicMaterial;
-      const frontGlow = Math.pow(tunnelProgress, 1.7);
-      material.opacity =
-        ring.opacity * (0.45 + frontGlow * 1.35 + signal.energy * 0.55 + signal.onset * 0.75 + signal.flux * 0.32);
+    if (this.material) {
+      updateCommonUniforms(this.material, signal, this.time);
     }
-
-    if (this.starfield && this.starPositions) {
-      const speed = this.time * (0.62 + signal.energy * 1.8 + signal.onset * 1.1);
-      for (let index = 0; index < this.starPositions.length; index += 3) {
-        const seed = this.starSeeds[index / 3];
-        const baseX = this.starBase[index];
-        const baseY = this.starBase[index + 1];
-        const baseZ = this.starBase[index + 2];
-        const z = positiveModulo((baseZ + 7.2 + speed * (0.55 + seed * 1.8)) / 13.8, 1) * 13.8 - 7.2;
-        const angle = Math.atan2(baseY, baseX) + globalTwist * (0.08 + seed * 0.12);
-        const radius = Math.hypot(baseX, baseY) * (0.88 + signal.bass * 0.12 + signal.bassPulse * 0.06);
-
-        this.starPositions[index] = Math.cos(angle) * radius;
-        this.starPositions[index + 1] = Math.sin(angle) * radius * (0.72 + signal.mid * 0.08);
-        this.starPositions[index + 2] = z;
-      }
-
-      this.starfield.geometry.attributes.position.needsUpdate = true;
-      const material = this.starfield.material as THREE.PointsMaterial;
-      material.opacity = 0.12 + signal.energy * 0.25 + signal.flux * 0.16 + signal.onset * 0.24;
-      material.size = 0.016 + signal.treble * 0.018 + signal.treblePulse * 0.02;
-    }
-
-    this.group.rotation.x = Math.sin(this.time * 0.09) * (0.08 + signal.flatness * 0.08);
-    this.group.rotation.y = Math.cos(this.time * 0.08) * 0.1 + signal.centroid * 0.08;
-    this.group.scale.setScalar(1 + signal.bassPulse * 0.025 + signal.onset * 0.018);
+    return signal;
   }
 }
 
-interface CascadeWire {
-  line: THREE.Line;
-  row: number;
-  echo: number;
-  phase: number;
-  depth: number;
-  opacity: number;
-}
-
-class WireframeCascadePreset extends PresetBase {
-  id = 'wireframe-cascade' as const;
-  name = 'Wireframe Cascade';
-  private wires: CascadeWire[] = [];
-  private time = 0;
+class VortexEyePreset extends ShaderStagePreset {
+  id = 'vortex-eye' as const;
+  name = 'Vortex Eye';
 
   protected build(): void {
-    const rows = 11;
-    const echoes = 2;
-    const columns = 188;
-    const colors = [this.palette.glow, this.palette.primary, this.palette.secondary, this.palette.hot];
-
-    for (let echo = 0; echo < echoes; echo += 1) {
-      for (let row = 0; row < rows; row += 1) {
-        const geometry = createLineGeometry(columns);
-        fillLineColors(geometry, colors[(row + echo) % colors.length], colors[(row + echo + 1) % colors.length]);
-        const material = new THREE.LineBasicMaterial({
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          opacity: echo === 0 ? 0.34 : 0.11,
-          transparent: true,
-          vertexColors: true
-        });
-        const line = new THREE.Line(geometry, material);
-        this.wires.push({
-          line,
-          row,
-          echo,
-          phase: row * 0.53 + echo * 0.82,
-          depth: -3.4 + row * 0.42 - echo * 0.75,
-          opacity: echo === 0 ? 0.34 : 0.11
-        });
-        this.group.add(line);
-      }
-    }
-
-    this.group.rotation.x = -0.34;
+    this.buildShaderStage(vortexEyeFragmentShader);
   }
 
   update(features: AudioFeatures, deltaMs: number): void {
-    const signal = this.readSignal(features, deltaMs);
-    this.time += deltaMs * 0.001;
-    const span = this.size.width < 720 ? 10.4 : 12.8;
-    const rowMidpoint = 5;
-    const waveDepth = 0.24 + signal.mid * 0.9 + signal.midPulse * 0.65 + signal.dynamics * 0.34;
-
-    for (const wire of this.wires) {
-      const positions = wire.line.geometry.attributes.position.array as Float32Array;
-      const pointCount = positions.length / 3;
-      const rowOffset = wire.row - rowMidpoint;
-      const echoFade = wire.echo === 0 ? 1 : 0.62;
-
-      for (let column = 0; column < pointCount; column += 1) {
-        const progress = column / (pointCount - 1);
-        const offset = column * 3;
-        const mirrored = 1 - Math.abs(progress - 0.5) * 2;
-        const wave = sampleWaveform(features.waveform, progress, Math.sin(progress * Math.PI * 4 + this.time));
-        const band = sampleFrequency(features.bandEnvelopes, progress, 0.04);
-        const peak = sampleFrequency(features.bandPeaks, progress, band);
-        const contour =
-          Math.sin(progress * Math.PI * (4.2 + signal.rolloff * 2.6) + this.time * (0.88 + signal.flux) + wire.phase) *
-          (0.14 + band * 0.72 + peak * 0.28);
-        const roughness =
-          Math.sin(progress * Math.PI * 26 + wire.row * 0.9 + this.time * (1.4 + signal.flatness * 1.8)) *
-          signal.flatness *
-          (0.025 + peak * 0.12);
-        const bassRipple =
-          Math.sin(progress * Math.PI * 8 - this.time * 2.6 + rowOffset * 0.7) *
-          (signal.bassPulse * 0.18 + signal.onset * 0.1);
-        const x = (progress - 0.5) * span + Math.sin(this.time * 0.21 + wire.phase) * wire.echo * 0.18;
-        const y =
-          rowOffset * 0.42 +
-          wave * waveDepth * echoFade +
-          contour +
-          roughness +
-          bassRipple -
-          wire.echo * 0.18;
-        const z =
-          wire.depth +
-          mirrored * (1.2 + signal.bass * 0.85 + signal.bassPulse * 0.34) +
-          band * 0.55 +
-          Math.cos(progress * Math.PI * 3 + this.time * 0.46 + wire.phase) * (0.12 + signal.treble * 0.18);
-
-        positions[offset] = x;
-        positions[offset + 1] = y;
-        positions[offset + 2] = z;
-      }
-
-      wire.line.geometry.attributes.position.needsUpdate = true;
-      const material = wire.line.material as THREE.LineBasicMaterial;
-      material.opacity =
-        wire.opacity * (0.42 + signal.energy * 0.72 + signal.flux * 0.42 + signal.onset * 0.46 + signal.dynamics * 0.34);
-    }
-
-    this.group.rotation.z = Math.sin(this.time * 0.08) * (0.045 + signal.flatness * 0.035);
-    this.group.rotation.y = Math.sin(this.time * 0.06) * 0.18 + signal.rolloff * 0.08;
-    this.group.scale.setScalar(1 + signal.bass * 0.04 + signal.bassPulse * 0.03);
+    const signal = this.updateShader(features, deltaMs);
+    this.group.scale.setScalar(1 + signal.onset * 0.02 + signal.bassPulse * 0.018);
   }
 }
 
-interface FlowStrand {
-  line: THREE.Line;
-  phase: number;
-  radius: number;
-  speed: number;
-  opacity: number;
-}
-
-class ChromaticFlowPreset extends PresetBase {
-  id = 'chromatic-flow' as const;
-  name = 'Chromatic Flow';
-  private strands: FlowStrand[] = [];
-  private particles?: THREE.Points;
-  private particleBase = new Float32Array(0);
-  private particleSeeds = new Float32Array(0);
-  private particlePositions?: Float32Array;
-  private time = 0;
+class ElectricFoldPreset extends ShaderStagePreset {
+  id = 'electric-fold' as const;
+  name = 'Electric Fold';
 
   protected build(): void {
-    const strands = 32;
-    const points = 112;
-    const colors = [this.palette.primary, this.palette.secondary, this.palette.hot, this.palette.glow, this.palette.soft];
-
-    for (let index = 0; index < strands; index += 1) {
-      const geometry = createLineGeometry(points);
-      fillLineColors(geometry, colors[index % colors.length], colors[(index + 2) % colors.length]);
-      const material = new THREE.LineBasicMaterial({
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        opacity: 0.08 + (index % 5) * 0.018,
-        transparent: true,
-        vertexColors: true
-      });
-      const line = new THREE.Line(geometry, material);
-      this.strands.push({
-        line,
-        phase: (index / strands) * Math.PI * 2,
-        radius: 1.15 + (index % 8) * 0.28,
-        speed: 0.22 + (index % 7) * 0.035,
-        opacity: 0.08 + (index % 5) * 0.018
-      });
-      this.group.add(line);
-    }
-
-    const particleCount = 1_050;
-    const positions = new Float32Array(particleCount * 3);
-    const colorArray = new Float32Array(particleCount * 3);
-    const base = new Float32Array(particleCount * 3);
-    const seeds = new Float32Array(particleCount);
-    const random = seededRandom(7001);
-    const primary = new THREE.Color(this.palette.primary);
-    const secondary = new THREE.Color(this.palette.secondary);
-    const hot = new THREE.Color(this.palette.hot);
-
-    for (let index = 0; index < particleCount; index += 1) {
-      const offset = index * 3;
-      const seed = random();
-      const angle = random() * Math.PI * 2;
-      const radius = Math.pow(random(), 0.55) * 5.2;
-      const z = -2.8 + random() * 5.8;
-      const color = primary.clone().lerp(secondary, random()).lerp(hot, seed > 0.78 ? 0.34 : 0.04);
-
-      base[offset] = Math.cos(angle) * radius;
-      base[offset + 1] = Math.sin(angle) * radius * 0.82;
-      base[offset + 2] = z;
-      positions[offset] = base[offset];
-      positions[offset + 1] = base[offset + 1];
-      positions[offset + 2] = z;
-      colorArray[offset] = color.r;
-      colorArray[offset + 1] = color.g;
-      colorArray[offset + 2] = color.b;
-      seeds[index] = seed;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
-    const material = new THREE.PointsMaterial({
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      opacity: 0.22,
-      size: 0.022,
-      transparent: true,
-      vertexColors: true
-    });
-    this.particleBase = base;
-    this.particlePositions = positions;
-    this.particleSeeds = seeds;
-    this.particles = new THREE.Points(geometry, material);
-    this.group.add(this.particles);
+    this.buildShaderStage(electricFoldFragmentShader);
   }
 
   update(features: AudioFeatures, deltaMs: number): void {
-    const signal = this.readSignal(features, deltaMs);
-    this.time += deltaMs * 0.001;
-    const colorDrift = signal.centroid * 0.7 + signal.rolloff * 0.45;
-
-    for (const strand of this.strands) {
-      const positions = strand.line.geometry.attributes.position.array as Float32Array;
-      const pointCount = positions.length / 3;
-      const twist = this.time * (strand.speed + signal.flux * 0.38 + signal.rolloff * 0.18) + strand.phase;
-
-      for (let point = 0; point < pointCount; point += 1) {
-        const progress = point / (pointCount - 1);
-        const offset = point * 3;
-        const wave = sampleWaveform(features.waveform, positiveModulo(progress + strand.phase / (Math.PI * 2), 1), 0);
-        const band = sampleFrequency(features.bandEnvelopes, positiveModulo(progress + signal.centroid * 0.16, 1), 0.03);
-        const peak = sampleFrequency(features.bandPeaks, progress, band);
-        const spiral = progress * Math.PI * (4.6 + signal.flatness * 3.2) + twist;
-        const braid = Math.sin(progress * Math.PI * 8 + this.time * (0.8 + signal.flux) + strand.phase);
-        const radius =
-          strand.radius +
-          progress * (1.1 + signal.energy * 0.72) +
-          band * 0.78 +
-          peak * 0.28 +
-          wave * (0.28 + signal.dynamics * 0.48) +
-          signal.onset * 0.26;
-
-        positions[offset] = Math.cos(spiral) * radius + Math.sin(twist * 0.6 + progress * 7) * (0.25 + signal.mid * 0.32);
-        positions[offset + 1] =
-          Math.sin(spiral * 0.74 + strand.phase * 0.2) * radius * 0.72 +
-          braid * (0.2 + signal.treble * 0.42 + signal.treblePulse * 0.36);
-        positions[offset + 2] =
-          -2.7 +
-          progress * 5.4 +
-          Math.sin(spiral * 0.36 + colorDrift) * (0.52 + signal.flatness * 0.38) +
-          peak * 0.26;
-      }
-
-      strand.line.geometry.attributes.position.needsUpdate = true;
-      const material = strand.line.material as THREE.LineBasicMaterial;
-      material.opacity = strand.opacity * (0.72 + signal.energy * 1.05 + signal.flux * 1.2 + signal.onset * 0.82);
-    }
-
-    if (this.particles && this.particlePositions) {
-      for (let index = 0; index < this.particlePositions.length; index += 3) {
-        const seed = this.particleSeeds[index / 3];
-        const baseX = this.particleBase[index];
-        const baseY = this.particleBase[index + 1];
-        const baseZ = this.particleBase[index + 2];
-        const radius = Math.hypot(baseX, baseY);
-        const angle =
-          Math.atan2(baseY, baseX) +
-          this.time * (0.1 + seed * 0.25 + signal.centroid * 0.14) +
-          signal.flux * 0.18;
-        const band = sampleFrequency(features.bandEnvelopes, seed, 0.02);
-        const drift = Math.sin(this.time * (0.75 + seed) + radius * 1.6) * (0.08 + band * 0.34 + signal.flatness * 0.14);
-
-        this.particlePositions[index] = Math.cos(angle) * (radius + drift + signal.onset * seed * 0.35);
-        this.particlePositions[index + 1] =
-          Math.sin(angle) * (radius * 0.78 + drift) + Math.cos(this.time * 0.4 + seed * 7) * signal.midPulse * 0.22;
-        this.particlePositions[index + 2] =
-          baseZ + Math.sin(angle * 2.3 + this.time) * (0.18 + signal.treble * 0.28) + band * 0.42;
-      }
-
-      this.particles.geometry.attributes.position.needsUpdate = true;
-      const material = this.particles.material as THREE.PointsMaterial;
-      material.opacity = 0.1 + signal.energy * 0.22 + signal.flux * 0.22 + signal.onset * 0.18;
-      material.size = 0.016 + signal.treble * 0.014 + signal.treblePulse * 0.018;
-    }
-
-    this.group.rotation.x = Math.sin(this.time * 0.07) * (0.12 + signal.flatness * 0.08);
-    this.group.rotation.y = Math.cos(this.time * 0.08) * 0.14 + signal.rolloff * 0.08;
-    this.group.rotation.z = Math.sin(this.time * 0.05) * 0.04;
-    this.group.scale.setScalar(0.94 + signal.energy * 0.08 + signal.onset * 0.04);
+    const signal = this.updateShader(features, deltaMs);
+    this.group.rotation.z = Math.sin((this.material?.uniforms.uTime.value ?? 0) * 0.12) * (0.025 + signal.flatness * 0.018);
   }
 }
 
-interface ScopeBar {
+interface AnalyzerBar {
   bar: THREE.Mesh;
   cap: THREE.Mesh;
   index: number;
   baseColor: THREE.Color;
 }
 
-interface ScopeTrace {
+interface AnalyzerDune {
   mesh: THREE.Mesh;
-  offsetY: number;
-  phase: number;
+  y: number;
   thickness: number;
   opacity: number;
+  phase: number;
 }
 
-class SignalScopePreset extends PresetBase {
-  id = 'signal-scope' as const;
-  name = 'Signal Scope';
-  private bars: ScopeBar[] = [];
-  private traces: ScopeTrace[] = [];
-  private sweep?: THREE.Mesh;
-  private time = 0;
+class NeonAnalyzerPreset extends ShaderStagePreset {
+  id = 'neon-analyzer' as const;
+  name = 'Neon Analyzer';
+  private bars: AnalyzerBar[] = [];
+  private dunes: AnalyzerDune[] = [];
 
   protected build(): void {
-    const barCount = 72;
-    const barGeometry = new THREE.BoxGeometry(0.075, 1, 0.055);
-    const capGeometry = new THREE.BoxGeometry(0.09, 0.045, 0.075);
-    const primary = new THREE.Color(this.palette.primary);
-    const secondary = new THREE.Color(this.palette.secondary);
-    const hot = new THREE.Color(this.palette.hot);
+    this.buildShaderStage(neonAnalyzerFragmentShader);
 
-    for (let index = 0; index < barCount; index += 1) {
-      const progress = index / Math.max(1, barCount - 1);
-      const color = primary.clone().lerp(secondary, progress);
-      if (index % 9 === 0) {
-        color.lerp(hot, 0.42);
-      }
+    const count = 96;
+    const barGeometry = new THREE.BoxGeometry(0.072, 1, 0.08);
+    const capGeometry = new THREE.BoxGeometry(0.095, 0.055, 0.1);
+    const low = new THREE.Color('#74ff00');
+    const mid = new THREE.Color(this.palette.primary);
+    const high = new THREE.Color('#fff35c');
 
+    for (let index = 0; index < count; index += 1) {
+      const progress = index / Math.max(1, count - 1);
+      const color = progress < 0.55 ? low.clone().lerp(mid, progress / 0.55) : mid.clone().lerp(high, (progress - 0.55) / 0.45);
       const barMaterial = new THREE.MeshBasicMaterial({
         blending: THREE.AdditiveBlending,
         color,
         depthWrite: false,
-        opacity: 0.48,
+        opacity: 0.74,
         transparent: true
       });
       const capMaterial = new THREE.MeshBasicMaterial({
         blending: THREE.AdditiveBlending,
-        color: hot.clone().lerp(color, 0.35),
+        color: high.clone().lerp(color, 0.45),
         depthWrite: false,
-        opacity: 0.42,
+        opacity: 0.62,
         transparent: true
       });
       const bar = new THREE.Mesh(barGeometry.clone(), barMaterial);
@@ -634,124 +260,449 @@ class SignalScopePreset extends PresetBase {
       this.group.add(bar, cap);
     }
 
-    const traceColors = [this.palette.glow, this.palette.primary, this.palette.hot];
-    for (let index = 0; index < 3; index += 1) {
-      const geometry = createStripGeometry(292, false);
-      fillStripColors(geometry, traceColors[index], traceColors[(index + 1) % traceColors.length]);
+    const duneColors = [
+      ['#1e5bff', '#161bff'],
+      ['#ffb34d', '#2c5fff'],
+      [this.palette.primary, this.palette.hot]
+    ];
+    for (let index = 0; index < duneColors.length; index += 1) {
+      const geometry = createStripGeometry(220, false);
+      fillStripColors(geometry, duneColors[index][0], duneColors[index][1]);
       const material = new THREE.MeshBasicMaterial({
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        opacity: 0.28 - index * 0.055,
+        opacity: 0.28 - index * 0.045,
         side: THREE.DoubleSide,
         transparent: true,
         vertexColors: true
       });
       const mesh = new THREE.Mesh(geometry, material);
-      this.traces.push({
+      mesh.renderOrder = -1 + index;
+      this.dunes.push({
         mesh,
-        offsetY: 0.36 + index * 0.42,
-        phase: index * 0.17,
-        thickness: 0.028 + index * 0.012,
-        opacity: 0.28 - index * 0.055
+        y: -0.25 + index * 0.38,
+        thickness: 0.18 + index * 0.04,
+        opacity: 0.28 - index * 0.045,
+        phase: index * 0.19
       });
       this.group.add(mesh);
     }
-
-    const sweepGeometry = new THREE.BoxGeometry(0.035, 6.4, 0.045);
-    const sweepMaterial = new THREE.MeshBasicMaterial({
-      blending: THREE.AdditiveBlending,
-      color: this.palette.glow,
-      depthWrite: false,
-      opacity: 0.12,
-      transparent: true
-    });
-    this.sweep = new THREE.Mesh(sweepGeometry, sweepMaterial);
-    this.group.add(this.sweep);
   }
 
   update(features: AudioFeatures, deltaMs: number): void {
-    const signal = this.readSignal(features, deltaMs);
-    this.time += deltaMs * 0.001;
-    const span = this.size.width < 720 ? 10.2 : 12.2;
-    const floor = -3.08;
-    const hot = new THREE.Color(this.palette.hot);
-    const glow = new THREE.Color(this.palette.glow);
+    const signal = this.updateShader(features, deltaMs);
+    const time = this.material?.uniforms.uTime.value ?? 0;
+    const span = this.size.width < 720 ? 10.0 : 12.2;
+    const floor = -3.05;
+    const hot = new THREE.Color('#fff35c');
 
     for (const entry of this.bars) {
       const progress = entry.index / Math.max(1, this.bars.length - 1);
-      const band = sampleFrequency(features.bandEnvelopes, progress, 0.025);
+      const band = sampleFrequency(features.bandEnvelopes, progress, 0.04);
       const peak = sampleFrequency(features.bandPeaks, progress, band);
-      const bandPulse = progress < 0.2 ? signal.bassPulse : progress < 0.66 ? signal.midPulse : signal.treblePulse;
-      const height = 0.08 + band * 3.25 + peak * 0.74 + bandPulse * 0.62 + signal.onset * 0.18;
-      const peakHeight = 0.1 + peak * 3.42 + bandPulse * 0.45 + signal.dynamics * 0.24;
+      const bandPulse = progress < 0.22 ? signal.bassPulse : progress < 0.68 ? signal.midPulse : signal.treblePulse;
+      const idleLilt = Math.sin(time * 1.8 + progress * Math.PI * 16) * 0.08;
+      const height = clamp(0.18 + band * 4.9 + peak * 0.82 + bandPulse * 0.74 + signal.onset * 0.28 + idleLilt, 0.08, 5.7);
       const x = (progress - 0.5) * span;
-      const z = -0.82 + Math.sin(this.time * 0.8 + progress * Math.PI * 3) * (0.08 + signal.flatness * 0.18);
+      const z = -0.2 + Math.sin(progress * Math.PI * 5 + time * 0.6) * (0.035 + signal.flatness * 0.08);
 
       entry.bar.position.set(x, floor + height / 2, z);
-      entry.bar.scale.set(1 + signal.onset * 0.12 + bandPulse * 0.12, height, 1 + peak * 0.28);
-      entry.cap.position.set(x, floor + peakHeight + 0.08, z + 0.04);
-      entry.cap.scale.set(1 + peak * 0.5, 1, 1 + signal.treblePulse * 0.24);
+      entry.bar.scale.set(1 + bandPulse * 0.18, height, 1 + peak * 0.36);
+      entry.cap.position.set(x, floor + height + 0.08 + peak * 0.42, z + 0.045);
+      entry.cap.scale.set(1 + peak * 0.7 + bandPulse * 0.18, 1, 1);
 
       const barMaterial = entry.bar.material as THREE.MeshBasicMaterial;
       const capMaterial = entry.cap.material as THREE.MeshBasicMaterial;
-      barMaterial.color.copy(entry.baseColor).lerp(hot, signal.rolloff * 0.22 + bandPulse * 0.2).lerp(glow, signal.treblePulse * 0.12);
-      barMaterial.opacity = 0.16 + band * 0.46 + peak * 0.28 + signal.energy * 0.16 + bandPulse * 0.14;
-      capMaterial.opacity = 0.16 + peak * 0.34 + bandPulse * 0.24 + signal.onset * 0.16;
+      barMaterial.color.copy(entry.baseColor).lerp(hot, peak * 0.35 + bandPulse * 0.18);
+      barMaterial.opacity = 0.22 + band * 0.7 + peak * 0.34 + signal.energy * 0.18 + bandPulse * 0.18;
+      capMaterial.opacity = 0.12 + peak * 0.42 + bandPulse * 0.28 + signal.onset * 0.18;
     }
 
-    for (const trace of this.traces) {
-      const positions = trace.mesh.geometry.attributes.position.array as Float32Array;
+    for (const dune of this.dunes) {
+      const positions = dune.mesh.geometry.attributes.position.array as Float32Array;
       const pointCount = positions.length / 6;
-
       for (let point = 0; point < pointCount; point += 1) {
-        const progress = point / (pointCount - 1);
+        const progress = point / Math.max(1, pointCount - 1);
         const offset = point * 6;
-        const waveform = sampleWaveform(features.waveform, positiveModulo(progress + trace.phase, 1), 0);
-        const band = sampleFrequency(features.bandEnvelopes, progress, 0.03);
+        const band = sampleFrequency(features.bandEnvelopes, progress, 0.04);
         const peak = sampleFrequency(features.bandPeaks, progress, band);
+        const waveform = sampleWaveform(features.waveform, positiveModulo(progress + dune.phase, 1), 0);
         const x = (progress - 0.5) * span;
-        const beam =
-          trace.offsetY +
-          waveform * (0.62 + signal.mid * 1.05 + signal.dynamics * 0.52) +
-          Math.sin(progress * Math.PI * 5 + this.time * (0.78 + signal.rolloff * 0.5) + trace.phase * 4) *
-            (0.06 + signal.flatness * 0.16 + peak * 0.12) +
-          band * (0.34 + signal.treble * 0.24);
-        const thickness = trace.thickness * (1 + signal.energy * 1.1 + signal.onset * 0.75) + peak * 0.018;
-        const z = 0.28 + Math.sin(this.time * 0.42 + trace.phase + progress * Math.PI * 2) * (0.05 + signal.treble * 0.18);
+        const silhouette =
+          dune.y +
+          Math.pow(band, 0.72) * (1.15 + signal.energy * 0.8) +
+          peak * 0.42 +
+          waveform * (0.22 + signal.dynamics * 0.38) +
+          Math.sin(progress * Math.PI * (5 + dune.phase * 8) + time * (0.9 + signal.flux)) * (0.05 + signal.flatness * 0.12);
+        const thickness = dune.thickness * (1 + signal.onset * 0.45) + peak * 0.03;
 
         positions[offset] = x;
-        positions[offset + 1] = beam + thickness;
-        positions[offset + 2] = z;
+        positions[offset + 1] = silhouette + thickness;
+        positions[offset + 2] = -0.48 - dune.phase;
         positions[offset + 3] = x;
-        positions[offset + 4] = beam - thickness;
-        positions[offset + 5] = z - 0.035;
+        positions[offset + 4] = dune.y - thickness * 0.7;
+        positions[offset + 5] = -0.55 - dune.phase;
       }
-
-      trace.mesh.geometry.attributes.position.needsUpdate = true;
-      const material = trace.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = trace.opacity * (0.62 + signal.energy * 0.72 + signal.flux * 0.48 + signal.onset * 0.52);
+      dune.mesh.geometry.attributes.position.needsUpdate = true;
+      const material = dune.mesh.material as THREE.MeshBasicMaterial;
+      material.opacity = dune.opacity * (0.58 + signal.energy * 0.85 + signal.flux * 0.5 + signal.onset * 0.5);
     }
 
-    if (this.sweep) {
-      const sweepProgress = positiveModulo(this.time * (0.095 + signal.energy * 0.12 + signal.flux * 0.08), 1);
-      const x = (sweepProgress - 0.5) * (span + 0.7);
-      const material = this.sweep.material as THREE.MeshBasicMaterial;
-      this.sweep.position.set(x, -0.12 + signal.onset * 0.2, -0.05);
-      this.sweep.scale.set(1 + signal.onset * 0.8, 1 + signal.energy * 0.12, 1);
-      material.opacity = 0.06 + signal.energy * 0.1 + signal.onset * 0.18 + signal.flux * 0.1;
-    }
-
-    this.group.rotation.x = -0.02 + Math.sin(this.time * 0.07) * (0.04 + signal.flatness * 0.05);
-    this.group.rotation.y = Math.sin(this.time * 0.05) * 0.08 + signal.centroid * 0.04;
-    this.group.scale.setScalar(1 + signal.bassPulse * 0.025 + signal.onset * 0.02);
+    this.group.rotation.x = Math.sin(time * 0.05) * 0.025;
+    this.group.rotation.y = Math.sin(time * 0.07) * 0.035 + signal.centroid * 0.02;
   }
 }
 
-function createLineGeometry(pointCount: number): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pointCount * 3), 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pointCount * 3), 3));
-  return geometry;
+class PlasmaBowlPreset extends ShaderStagePreset {
+  id = 'plasma-bowl' as const;
+  name = 'Plasma Bowl';
+  private sparks?: THREE.Points;
+  private sparkBase = new Float32Array(0);
+  private sparkSeeds = new Float32Array(0);
+  private sparkPositions?: Float32Array;
+
+  protected build(): void {
+    this.buildShaderStage(plasmaBowlFragmentShader);
+
+    const count = 900;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const base = new Float32Array(count * 3);
+    const seeds = new Float32Array(count);
+    const random = seededRandom(9097);
+    const fire = new THREE.Color('#ff3b18');
+    const gold = new THREE.Color('#fff04f');
+    const blue = new THREE.Color('#132cff');
+
+    for (let index = 0; index < count; index += 1) {
+      const offset = index * 3;
+      const seed = random();
+      const angle = random() * Math.PI * 2;
+      const radius = Math.pow(random(), 0.62) * 4.7;
+      const height = -3.1 + Math.pow(random(), 1.7) * 4.3;
+      const color = fire.clone().lerp(gold, random() * 0.72).lerp(blue, seed < 0.16 ? 0.65 : 0.04);
+
+      base[offset] = Math.cos(angle) * radius;
+      base[offset + 1] = height;
+      base[offset + 2] = Math.sin(angle) * radius * 0.16;
+      positions[offset] = base[offset];
+      positions[offset + 1] = base[offset + 1];
+      positions[offset + 2] = base[offset + 2];
+      colors[offset] = color.r;
+      colors[offset + 1] = color.g;
+      colors[offset + 2] = color.b;
+      seeds[index] = seed;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      opacity: 0.34,
+      size: 0.038,
+      transparent: true,
+      vertexColors: true
+    });
+    this.sparkBase = base;
+    this.sparkPositions = positions;
+    this.sparkSeeds = seeds;
+    this.sparks = new THREE.Points(geometry, material);
+    this.group.add(this.sparks);
+  }
+
+  update(features: AudioFeatures, deltaMs: number): void {
+    const signal = this.updateShader(features, deltaMs);
+    const time = this.material?.uniforms.uTime.value ?? 0;
+
+    if (this.sparks && this.sparkPositions) {
+      for (let index = 0; index < this.sparkPositions.length; index += 3) {
+        const seed = this.sparkSeeds[index / 3];
+        const baseX = this.sparkBase[index];
+        const baseY = this.sparkBase[index + 1];
+        const baseZ = this.sparkBase[index + 2];
+        const lift = positiveModulo(baseY + 3.1 + time * (0.42 + seed * 0.86 + signal.energy * 0.9), 4.5);
+        const swirl = Math.atan2(baseZ, baseX) + time * (0.18 + seed * 0.42) + signal.flux * 0.24;
+        const radius = Math.hypot(baseX, baseZ) * (0.86 + signal.bass * 0.16 + signal.bassPulse * 0.08);
+
+        this.sparkPositions[index] = Math.cos(swirl) * radius;
+        this.sparkPositions[index + 1] = -3.1 + lift + Math.sin(time * 3 + seed * 9) * (0.05 + signal.treble * 0.18);
+        this.sparkPositions[index + 2] = Math.sin(swirl) * radius * 0.18 - 0.2;
+      }
+      this.sparks.geometry.attributes.position.needsUpdate = true;
+      const material = this.sparks.material as THREE.PointsMaterial;
+      material.opacity = 0.12 + signal.energy * 0.26 + signal.bassPulse * 0.18 + signal.onset * 0.2;
+      material.size = 0.026 + signal.treble * 0.018 + signal.treblePulse * 0.026;
+    }
+
+    this.group.scale.setScalar(1 + signal.onset * 0.025 + signal.bassPulse * 0.02);
+  }
+}
+
+const fullScreenVertexShader = `
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const shaderPrelude = `
+  precision highp float;
+
+  varying vec2 vUv;
+
+  uniform float uTime;
+  uniform float uAspect;
+  uniform float uEnergy;
+  uniform float uBass;
+  uniform float uMid;
+  uniform float uTreble;
+  uniform float uCentroid;
+  uniform float uFlux;
+  uniform float uFlatness;
+  uniform float uRolloff;
+  uniform float uDynamics;
+  uniform float uOnset;
+  uniform float uBassPulse;
+  uniform float uMidPulse;
+  uniform float uTreblePulse;
+  uniform vec3 uColorA;
+  uniform vec3 uColorB;
+  uniform vec3 uColorC;
+  uniform vec3 uColorD;
+  uniform vec3 uSoft;
+
+  float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 345.45));
+    p += dot(p, p + 34.345);
+    return fract(p.x * p.y);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  }
+
+  float fbm(vec2 p) {
+    float value = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 5; i += 1) {
+      value += noise(p) * amp;
+      p = mat2(1.62, 1.21, -1.21, 1.62) * p + 7.3;
+      amp *= 0.5;
+    }
+    return value;
+  }
+
+  float lineGlow(float distanceToLine, float width) {
+    return exp(-abs(distanceToLine) / max(0.0001, width));
+  }
+
+  vec4 luminous(vec3 color, float gain) {
+    vec3 toned = clamp(color, vec3(0.0), vec3(0.92));
+    float alpha = clamp(max(max(toned.r, toned.g), toned.b) * gain, 0.0, 0.88);
+    return vec4(toned, alpha);
+  }
+`;
+
+const vortexEyeFragmentShader = `
+  ${shaderPrelude}
+
+  void main() {
+    vec2 p = vUv - 0.5;
+    p.x *= uAspect;
+    float r = length(p);
+    float a = atan(p.y, p.x);
+    float pulse = uOnset * 0.8 + uBassPulse * 0.55 + uEnergy * 0.35;
+    float twist = a + 1.65 / (r + 0.065) + uTime * (0.24 + uFlux * 0.42) + sin(r * 8.0 - uTime) * 0.22;
+    float cloudy = fbm(vec2(cos(twist), sin(twist)) * (2.2 + uFlatness * 3.2) + r * 8.0 - uTime * 0.38);
+    float rings = 0.5 + 0.5 * sin(r * (48.0 + uRolloff * 22.0) - uTime * (2.4 + uBass * 3.0) + cloudy * 4.0);
+    float spokes = pow(0.5 + 0.5 * sin(twist * (10.0 + uCentroid * 10.0) + r * 7.0 + uTime * 1.2), 4.0);
+    float mask = smoothstep(0.92, 0.08, r);
+    float iris = mask * (pow(rings, 5.0) * 0.68 + pow(spokes, 2.6) * 0.34 + cloudy * 0.1);
+    float halo = exp(-abs(r - (0.32 + pulse * 0.08)) * (8.0 - uEnergy * 2.2));
+    float core = smoothstep(0.21 + pulse * 0.04, 0.055, r);
+    float scan = lineGlow(p.y + sin(p.x * 4.0 + uTime) * 0.018, 0.01 + uTreblePulse * 0.018);
+
+    vec3 cold = mix(vec3(0.02, 0.18, 0.75), vec3(0.22, 1.0, 0.9), 0.45 + uCentroid * 0.25);
+    vec3 glow = mix(vec3(0.12, 0.82, 1.0), vec3(1.0, 0.98, 0.86), clamp(halo + spokes * 0.4, 0.0, 1.0));
+    vec3 color = cold * iris * (0.7 + uEnergy * 0.6);
+    color += glow * pow(halo, 2.2) * (1.15 + uEnergy * 0.8);
+    color += vec3(0.95, 0.06, 1.0) * pow(spokes * rings, 2.0) * 0.18;
+    color += vec3(0.72, 1.0, 0.98) * scan * (0.22 + uTreble * 0.36);
+    color *= 1.0 - core * 0.92;
+    color += vec3(0.78, 1.0, 1.0) * exp(-r * 34.0) * (0.25 + pulse * 0.65);
+    color *= smoothstep(1.18, 0.28, r);
+    color = max(color - vec3(0.018), vec3(0.0));
+    color = pow(max(color, vec3(0.0)), vec3(0.82));
+
+    gl_FragColor = luminous(color, 1.25);
+  }
+`;
+
+const electricFoldFragmentShader = `
+  ${shaderPrelude}
+
+  void main() {
+    vec2 p = vUv - 0.5;
+    p.x *= uAspect;
+    float fold = abs(p.y);
+    float n = fbm(vec2(p.x * 4.0 + uTime * 0.55, fold * 14.0 - uTime * 0.22));
+    float jag = (noise(vec2(p.x * 58.0 + uTime * 2.4, fold * 8.0)) - 0.5) * (0.11 + uFlatness * 0.19);
+    float contour = 0.12 + sin(p.x * (4.0 + uRolloff * 3.0) + uTime * 1.1 + n * 4.0) * (0.13 + uMid * 0.22);
+    float jaw = pow(lineGlow(fold - contour - jag, 0.012 + uOnset * 0.018), 2.7);
+    float echo = pow(lineGlow(fold - contour * 1.55 + jag * 0.4, 0.018 + uEnergy * 0.018), 3.2);
+    float center = pow(lineGlow(p.y + sin(p.x * 10.0 + uTime * 1.4) * (0.025 + uFlux * 0.05), 0.009 + uTreblePulse * 0.015), 2.4);
+    float smoke = smoothstep(0.48, 0.02, fold) * fbm(p * vec2(3.0, 5.0) + uTime * vec2(0.16, -0.26));
+    float flash = lineGlow(length(vec2(p.x * 0.45, p.y)) - (0.08 + uOnset * 0.08), 0.025 + uFlux * 0.02);
+
+    vec3 violet = vec3(0.82, 0.16, 1.0);
+    vec3 cyan = vec3(0.34, 1.0, 0.94);
+    vec3 white = vec3(1.0, 0.94, 1.0);
+    vec3 color = violet * pow(smoke, 8.0) * (0.025 + uEnergy * 0.08);
+    color += mix(violet, white, jaw) * jaw * (2.4 + uTreble * 0.7);
+    color += cyan * center * (1.15 + uTreblePulse * 1.35);
+    color += vec3(0.9, 0.06, 1.0) * echo * (0.52 + uMidPulse * 0.62);
+    color += white * pow(flash, 4.0) * (0.06 + uOnset * 0.14);
+    color *= smoothstep(1.18, 0.24, length(p));
+    color = max(color - vec3(0.032), vec3(0.0));
+    color = pow(color, vec3(0.78));
+
+    gl_FragColor = luminous(color, 1.35);
+  }
+`;
+
+const neonAnalyzerFragmentShader = `
+  ${shaderPrelude}
+
+  void main() {
+    vec2 uv = vUv;
+    vec2 p = uv - 0.5;
+    p.x *= uAspect;
+    float gridX = smoothstep(0.48, 0.5, abs(fract(uv.x * 36.0) - 0.5));
+    float scan = lineGlow(p.y - sin(p.x * 4.0 + uTime * 0.6) * 0.03, 0.012);
+    float block = step(0.72, noise(floor(vec2(uv.x * 22.0, uv.y * 12.0)) + floor(uTime * 1.8))) * smoothstep(0.18, 0.78, uv.y);
+    float field = fbm(uv * vec2(3.0, 2.0) + vec2(uTime * 0.06, -uTime * 0.04));
+    float dune = smoothstep(0.0, 0.018 + uEnergy * 0.02, (0.2 + field * 0.25 + uEnergy * 0.12) - uv.y);
+
+    vec3 color = vec3(0.0);
+    color += vec3(0.0, 0.08, 0.02) * gridX * 0.12;
+    color += mix(vec3(0.02, 0.08, 0.55), vec3(0.95, 0.46, 0.14), uv.x) * dune * (0.16 + uEnergy * 0.22);
+    color += vec3(0.2, 1.0, 0.12) * block * (0.05 + uFlux * 0.16);
+    color += uColorA * scan * (0.18 + uTreblePulse * 0.22);
+    color = max(color - vec3(0.012), vec3(0.0));
+
+    gl_FragColor = luminous(color, 1.2);
+  }
+`;
+
+const plasmaBowlFragmentShader = `
+  ${shaderPrelude}
+
+  void main() {
+    vec2 p = vUv - 0.5;
+    p.x *= uAspect;
+    float r = length(p);
+    float a = atan(p.y, p.x);
+    float base = smoothstep(0.52, 0.08, abs(p.y + 0.39) + abs(p.x) * 0.28);
+    float bowl = lineGlow(length(vec2(p.x * 0.82, p.y + 0.43)) - (0.36 + uBassPulse * 0.05), 0.035 + uEnergy * 0.025);
+    float flameNoise = fbm(vec2(p.x * 4.8 + sin(a * 3.0), (p.y + 0.5) * 5.2 - uTime * (0.9 + uEnergy)));
+    float flame = smoothstep(0.48, 0.04, abs(p.x) + max(p.y + 0.28, 0.0) * 0.72) * flameNoise;
+    flame *= smoothstep(-0.12, 0.42, p.y + 0.54);
+    float sparks = pow(noise(vec2(a * 9.0 + uTime * 1.7, r * 16.0 - uTime * 2.2)), 7.0) * smoothstep(0.68, 0.04, r);
+    float hotCore = exp(-length(vec2(p.x * 1.25, p.y + 0.38)) * (5.2 - uOnset * 0.8));
+    float blueLip = lineGlow(p.y + 0.44 + sin(p.x * 10.0 + uTime) * 0.025, 0.035 + uBassPulse * 0.025);
+
+    vec3 red = vec3(1.0, 0.1, 0.02);
+    vec3 gold = vec3(1.0, 0.92, 0.15);
+    vec3 blue = vec3(0.06, 0.1, 1.0);
+    vec3 color = vec3(0.01, 0.0, 0.0);
+    color += red * flame * (0.95 + uEnergy * 0.7);
+    color += gold * pow(flame, 2.3) * (1.1 + uOnset * 0.6);
+    color += blue * blueLip * (0.42 + uBassPulse * 0.7);
+    color += mix(red, gold, sparks) * sparks * (0.8 + uTreblePulse * 1.2);
+    color += gold * bowl * (0.32 + uBassPulse * 0.54);
+    color += mix(red, gold, hotCore) * hotCore * base * (0.28 + uEnergy * 0.28);
+    color *= smoothstep(1.08, 0.18, r);
+    color = max(color - vec3(0.035), vec3(0.0));
+    color = pow(color, vec3(0.72));
+
+    gl_FragColor = luminous(color, 1.1);
+  }
+`;
+
+interface CommonUniforms extends Record<string, THREE.IUniform> {
+  uTime: { value: number };
+  uAspect: { value: number };
+  uEnergy: { value: number };
+  uBass: { value: number };
+  uMid: { value: number };
+  uTreble: { value: number };
+  uCentroid: { value: number };
+  uFlux: { value: number };
+  uFlatness: { value: number };
+  uRolloff: { value: number };
+  uDynamics: { value: number };
+  uOnset: { value: number };
+  uBassPulse: { value: number };
+  uMidPulse: { value: number };
+  uTreblePulse: { value: number };
+  uColorA: { value: THREE.Color };
+  uColorB: { value: THREE.Color };
+  uColorC: { value: THREE.Color };
+  uColorD: { value: THREE.Color };
+  uSoft: { value: THREE.Color };
+}
+
+function createCommonUniforms(palette: Palette): CommonUniforms {
+  return {
+    uTime: { value: 0 },
+    uAspect: { value: 1 },
+    uEnergy: { value: 0 },
+    uBass: { value: 0 },
+    uMid: { value: 0 },
+    uTreble: { value: 0 },
+    uCentroid: { value: 0 },
+    uFlux: { value: 0 },
+    uFlatness: { value: 0 },
+    uRolloff: { value: 0 },
+    uDynamics: { value: 0 },
+    uOnset: { value: 0 },
+    uBassPulse: { value: 0 },
+    uMidPulse: { value: 0 },
+    uTreblePulse: { value: 0 },
+    uColorA: { value: new THREE.Color(palette.primary) },
+    uColorB: { value: new THREE.Color(palette.secondary) },
+    uColorC: { value: new THREE.Color(palette.hot) },
+    uColorD: { value: new THREE.Color(palette.glow) },
+    uSoft: { value: new THREE.Color(palette.soft) }
+  };
+}
+
+function updateCommonUniforms(material: THREE.ShaderMaterial, signal: VisualSignal, time: number): void {
+  material.uniforms.uTime.value = time;
+  material.uniforms.uEnergy.value = signal.energy;
+  material.uniforms.uBass.value = signal.bass;
+  material.uniforms.uMid.value = signal.mid;
+  material.uniforms.uTreble.value = signal.treble;
+  material.uniforms.uCentroid.value = signal.centroid;
+  material.uniforms.uFlux.value = signal.flux;
+  material.uniforms.uFlatness.value = signal.flatness;
+  material.uniforms.uRolloff.value = signal.rolloff;
+  material.uniforms.uDynamics.value = signal.dynamics;
+  material.uniforms.uOnset.value = signal.onset;
+  material.uniforms.uBassPulse.value = signal.bassPulse;
+  material.uniforms.uMidPulse.value = signal.midPulse;
+  material.uniforms.uTreblePulse.value = signal.treblePulse;
 }
 
 function createStripGeometry(pointCount: number, closed: boolean): THREE.BufferGeometry {
@@ -772,24 +723,6 @@ function createStripGeometry(pointCount: number, closed: boolean): THREE.BufferG
 
   geometry.setIndex(indices);
   return geometry;
-}
-
-function fillLineColors(geometry: THREE.BufferGeometry, start: string, end: string): void {
-  const colors = geometry.attributes.color.array as Float32Array;
-  const startColor = new THREE.Color(start);
-  const endColor = new THREE.Color(end);
-  const pointCount = colors.length / 3;
-
-  for (let index = 0; index < pointCount; index += 1) {
-    const progress = index / Math.max(1, pointCount - 1);
-    const color = startColor.clone().lerp(endColor, progress);
-    const offset = index * 3;
-    colors[offset] = color.r;
-    colors[offset + 1] = color.g;
-    colors[offset + 2] = color.b;
-  }
-
-  geometry.attributes.color.needsUpdate = true;
 }
 
 function fillStripColors(geometry: THREE.BufferGeometry, start: string, end: string): void {

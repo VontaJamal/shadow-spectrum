@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type { AudioFeatures } from '../audio/types';
 
-export type PresetId = 'feedback-tunnel' | 'wireframe-cascade' | 'chromatic-flow' | 'signal-scope';
+export type PresetId = 'vortex-eye' | 'electric-fold' | 'neon-analyzer' | 'plasma-bowl';
 export type PaletteId = 'aurora' | 'ember' | 'mono-gold';
 
 export interface Palette {

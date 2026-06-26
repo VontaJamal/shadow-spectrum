@@ -9,7 +9,7 @@ interface TestSettings {
 }
 
 const defaultSettings: TestSettings = {
-  presetId: 'feedback-tunnel',
+  presetId: 'vortex-eye',
   autoCycle: false
 };
 
@@ -38,9 +38,9 @@ describe('usePersistedSettings', () => {
 
     render(<Harness />);
 
-    expect(screen.getByTestId('settings')).toHaveTextContent('feedback-tunnel:true');
+    expect(screen.getByTestId('settings')).toHaveTextContent('vortex-eye:true');
     expect(JSON.parse(window.localStorage.getItem('test-visualizer-settings') ?? '{}')).toEqual({
-      presetId: 'feedback-tunnel',
+      presetId: 'vortex-eye',
       autoCycle: true
     });
   });
