@@ -1,11 +1,30 @@
 import type { Palette, PaletteId, PresetId } from './types';
 
 export const presets: Array<{ id: PresetId; label: string }> = [
-  { id: 'particle-field', label: 'Particles' },
-  { id: 'liquid-ribbons', label: 'Ribbons' },
-  { id: 'spectral-bloom', label: 'Bloom' },
-  { id: 'waveform-orbit', label: 'Orbit' }
+  { id: 'vortex-eye', label: 'Vortex Eye' },
+  { id: 'electric-fold', label: 'Electric Fold' },
+  { id: 'liquid-veil', label: 'Liquid Veil' },
+  { id: 'plasma-bowl', label: 'Plasma Bowl' }
 ];
+
+export const defaultPresetId: PresetId = 'vortex-eye';
+
+const presetIds = new Set<PresetId>(presets.map((preset) => preset.id));
+const migratedPresetIds: Record<string, PresetId> = {
+  'neon-analyzer': 'liquid-veil'
+};
+
+export function isPresetId(value: unknown): value is PresetId {
+  return typeof value === 'string' && presetIds.has(value as PresetId);
+}
+
+export function normalizePresetId(value: unknown): PresetId {
+  if (isPresetId(value)) {
+    return value;
+  }
+
+  return typeof value === 'string' ? (migratedPresetIds[value] ?? defaultPresetId) : defaultPresetId;
+}
 
 export const palettes: Array<{ id: PaletteId; label: string }> = [
   { id: 'aurora', label: 'Aurora' },

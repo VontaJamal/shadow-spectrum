@@ -6,10 +6,11 @@ import { ControlOverlay } from './ControlOverlay';
 
 const settings: VisualizerSettings = {
   sourceMode: 'synthetic-demo',
-  presetId: 'particle-field',
+  presetId: 'vortex-eye',
   paletteId: 'aurora',
   sensitivity: 1.1,
   smoothing: 0.78,
+  autoCycle: false,
   fullscreen: false
 };
 
@@ -70,10 +71,32 @@ describe('ControlOverlay', () => {
     );
 
     await user.selectOptions(screen.getByLabelText(/source/i), 'microphone');
-    await user.selectOptions(screen.getByLabelText(/preset/i), 'liquid-ribbons');
+    await user.selectOptions(screen.getByLabelText(/preset/i), 'liquid-veil');
 
     expect(onSettingsChange).toHaveBeenCalledWith({ sourceMode: 'microphone' });
-    expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-ribbons' });
+    expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-veil' });
+  });
+
+  it('persists auto-cycle changes through the settings callback', async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+
+    render(
+      <ControlOverlay
+        isRunning={false}
+        message="Ready"
+        onSettingsChange={onSettingsChange}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onToggleFullscreen={vi.fn()}
+        settings={settings}
+        status="idle"
+      />
+    );
+
+    await user.click(screen.getByLabelText(/auto-cycle/i));
+
+    expect(onSettingsChange).toHaveBeenCalledWith({ autoCycle: true });
   });
 
   it('marks the overlay as running so controls can recede and reveal on focus or hover', () => {

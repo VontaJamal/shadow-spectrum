@@ -33,8 +33,20 @@ export interface AudioFeatures {
   treble: number;
   centroid: number;
   beatPulse: number;
+  energy: number;
+  spectralFlux: number;
+  spectralFlatness: number;
+  spectralRolloff: number;
+  dynamicRange: number;
+  onsetPulse: number;
+  bassPulse: number;
+  midPulse: number;
+  treblePulse: number;
   frequencyBins: Float32Array;
   waveform: Float32Array;
+  bands: Float32Array;
+  bandEnvelopes: Float32Array;
+  bandPeaks: Float32Array;
   isSilent: boolean;
 }
 

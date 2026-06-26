@@ -1,10 +1,11 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
+import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { AudioFeatures } from '../audio/types';
-import { createSilentAudioFeatures } from '../audio/featureExtractor';
+import { VISUAL_BAND_COUNT, createSilentAudioFeatures } from '../audio/featureExtractor';
 import { createPreset } from './presets';
 import { getPalette } from './options';
 import type { PaletteId, PresetId, VisualizerPreset } from './types';
@@ -51,10 +52,13 @@ export function VisualizerCanvas({ featuresRef, paletteId, presetId, running }: 
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     scene.add(ambient);
     const renderPass = new RenderPass(scene, camera);
+    const afterimagePass = new AfterimagePass(0.88);
     const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.72, 0.58, 0.08);
     const composer = new EffectComposer(renderer);
     composer.addPass(renderPass);
+    composer.addPass(afterimagePass);
     composer.addPass(bloomPass);
+    const director = new SceneDirector();
 
     const resize = (): void => {
       const width = canvas.clientWidth || window.innerWidth;
@@ -73,6 +77,7 @@ export function VisualizerCanvas({ featuresRef, paletteId, presetId, running }: 
       renderer.setClearColor(nextPalette.background, 1);
       scene.background = new THREE.Color(nextPalette.background);
       scene.fog = new THREE.FogExp2(nextPalette.fog, 0.035);
+      director.reset();
       presetRef.current = createPreset(nextPresetId, nextPalette);
       presetRef.current.init(scene);
       resize();
@@ -96,15 +101,19 @@ export function VisualizerCanvas({ featuresRef, paletteId, presetId, running }: 
       const deltaMs = time - lastTime;
       lastTime = time;
       const features = running ? featuresRef.current : createIdlePulse(time);
-      const exposureLift = Math.min(0.32, features.rms * 0.24 + features.beatPulse * 0.18);
-      const cameraDrift = Math.sin(time * 0.00012) * 0.14;
+      const directed = director.update(time, features, deltaMs);
 
-      camera.position.x = cameraDrift + features.centroid * 0.18;
-      camera.position.y = Math.cos(time * 0.0001) * 0.1 + features.bass * 0.08;
+      camera.position.x = directed.cameraX;
+      camera.position.y = directed.cameraY;
+      camera.position.z = directed.cameraZ;
       camera.lookAt(0, 0, 0);
-      renderer.toneMappingExposure = 0.94 + exposureLift;
-      bloomPass.strength = 0.62 + Math.min(0.72, features.rms * 0.46 + features.beatPulse * 0.62);
-      bloomPass.radius = 0.46 + Math.min(0.28, features.treble * 0.18 + features.centroid * 0.1);
+      renderer.toneMappingExposure = directed.exposure;
+      bloomPass.strength = directed.bloomStrength;
+      bloomPass.radius = directed.bloomRadius;
+      afterimagePass.uniforms.damp.value = directed.afterimageDamp;
+      if (scene.fog instanceof THREE.FogExp2) {
+        scene.fog.density = directed.fogDensity;
+      }
 
       presetRef.current?.update(features, deltaMs);
       composer.render();
@@ -131,6 +140,16 @@ export function VisualizerCanvas({ featuresRef, paletteId, presetId, running }: 
 function createIdlePulse(time: number): AudioFeatures {
   const silent = createSilentAudioFeatures();
   const pulse = (Math.sin(time / 900) + 1) / 2;
+  const bands = new Float32Array(VISUAL_BAND_COUNT);
+  const bandEnvelopes = new Float32Array(VISUAL_BAND_COUNT);
+  const bandPeaks = new Float32Array(VISUAL_BAND_COUNT);
+  for (let index = 0; index < VISUAL_BAND_COUNT; index += 1) {
+    const band = 0.025 + Math.sin(time / 1_200 + index * 0.58) * 0.012 + pulse * 0.025;
+    bands[index] = band;
+    bandEnvelopes[index] = band * 0.8;
+    bandPeaks[index] = band;
+  }
+
   return {
     ...silent,
     rms: 0.04 + pulse * 0.04,
@@ -138,6 +157,73 @@ function createIdlePulse(time: number): AudioFeatures {
     mid: 0.05,
     treble: 0.04,
     beatPulse: pulse * 0.08,
+    energy: 0.08 + pulse * 0.08,
+    spectralFlux: pulse * 0.06,
+    spectralFlatness: 0.18 + pulse * 0.08,
+    spectralRolloff: 0.32 + pulse * 0.08,
+    dynamicRange: 0.08 + pulse * 0.06,
+    onsetPulse: pulse * 0.06,
+    bassPulse: pulse * 0.08,
+    midPulse: pulse * 0.04,
+    treblePulse: pulse * 0.03,
+    bands,
+    bandEnvelopes,
+    bandPeaks,
     isSilent: true
   };
+}
+
+interface DirectedFrame {
+  cameraX: number;
+  cameraY: number;
+  cameraZ: number;
+  exposure: number;
+  bloomStrength: number;
+  bloomRadius: number;
+  afterimageDamp: number;
+  fogDensity: number;
+}
+
+class SceneDirector {
+  private cameraX = 0;
+  private cameraY = 0;
+  private cameraZ = 10.8;
+
+  reset(): void {
+    this.cameraX = 0;
+    this.cameraY = 0;
+    this.cameraZ = 10.8;
+  }
+
+  update(time: number, features: AudioFeatures, deltaMs: number): DirectedFrame {
+    const delta = Math.min(90, Math.max(0, deltaMs));
+    const alpha = 1 - Math.exp(-delta / 140);
+    const cameraDrift = Math.sin(time * 0.00012) * 0.14;
+    const targetX = cameraDrift + (features.centroid - 0.5) * 0.22 + features.spectralFlux * 0.1;
+    const targetY = Math.cos(time * 0.0001) * 0.1 + features.bass * 0.08 + features.dynamicRange * 0.06;
+    const targetZ = 10.82 - features.energy * 0.34 + features.onsetPulse * 0.18;
+
+    this.cameraX = lerp(this.cameraX, targetX, alpha);
+    this.cameraY = lerp(this.cameraY, targetY, alpha);
+    this.cameraZ = lerp(this.cameraZ, targetZ, alpha);
+
+    return {
+      cameraX: this.cameraX,
+      cameraY: this.cameraY,
+      cameraZ: this.cameraZ,
+      exposure: 0.92 + Math.min(0.44, features.energy * 0.3 + features.onsetPulse * 0.28 + features.spectralRolloff * 0.06),
+      bloomStrength: 0.56 + Math.min(0.92, features.energy * 0.58 + features.onsetPulse * 0.62 + features.spectralFlux * 0.34),
+      bloomRadius: 0.42 + Math.min(0.34, features.treblePulse * 0.18 + features.spectralFlatness * 0.08 + features.spectralRolloff * 0.1),
+      afterimageDamp: clamp(0.84 + features.energy * 0.07 + features.dynamicRange * 0.05 - features.onsetPulse * 0.03, 0.82, 0.94),
+      fogDensity: 0.029 + features.energy * 0.012 + features.spectralFlatness * 0.006
+    };
+  }
+}
+
+function lerp(from: number, to: number, alpha: number): number {
+  return from + (to - from) * clamp(alpha);
+}
+
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.min(max, Math.max(min, value));
 }

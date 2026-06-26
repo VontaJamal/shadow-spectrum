@@ -32,6 +32,13 @@ test('launches the Electron app and renders a nonblank visualizer', async () => 
 
   try {
     const page = await app.firstWindow();
+    const consoleErrors: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text());
+      }
+    });
+
     await page.waitForSelector('canvas.visualizer-canvas');
     await expect
       .poll(() => page.evaluate(() => window.visualizerApi?.platform), {
@@ -43,11 +50,14 @@ test('launches the Electron app and renders a nonblank visualizer', async () => 
     await expect.poll(() => canvasHasPixels(page)).toBe(true);
 
     await page.getByLabel('Toggle fullscreen').click();
-    for (const preset of ['particle-field', 'liquid-ribbons', 'spectral-bloom', 'waveform-orbit']) {
+    await page.getByLabel('Auto-cycle').check();
+    await expect(page.getByLabel('Auto-cycle')).toBeChecked();
+    for (const preset of ['vortex-eye', 'electric-fold', 'liquid-veil', 'plasma-bowl']) {
       await page.getByLabel('Preset').selectOption(preset);
       await expect.poll(() => canvasHasPixels(page), { message: `${preset} should render nonblank canvas output` }).toBe(true);
     }
     await expect(page.getByLabel('Audio visualizer canvas')).toBeVisible();
+    expect(consoleErrors).toEqual([]);
   } finally {
     await app.close();
   }
