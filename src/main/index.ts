@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import type { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
+import { APP_ID, APP_NAME } from '../shared/branding';
 
 let mainWindow: BrowserWindow | null = null;
 let systemAudioProcess: ChildProcessByStdio<null, Readable, Readable> | null = null;
@@ -157,7 +158,7 @@ function createWindow(): void {
     minWidth: 980,
     minHeight: 640,
     backgroundColor: '#05070a',
-    title: 'Spectra Drift',
+    title: APP_NAME,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
@@ -181,6 +182,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId(APP_ID);
+  app.setName(APP_NAME);
   nativeTheme.themeSource = 'dark';
   configureMediaCapture();
   createWindow();
