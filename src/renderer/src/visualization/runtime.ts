@@ -229,6 +229,9 @@ export class VisualizerRuntime {
     this.currentFrameTarget.setSize(pixelWidth, pixelHeight);
     this.feedbackRead.setSize(pixelWidth, pixelHeight);
     this.feedbackWrite.setSize(pixelWidth, pixelHeight);
+    this.clearRenderTarget(this.currentFrameTarget);
+    this.clearRenderTarget(this.feedbackRead);
+    this.clearRenderTarget(this.feedbackWrite);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.active.preset.resize(this.size);
@@ -352,6 +355,17 @@ export class VisualizerRuntime {
     this.renderer?.setClearColor(palette.background, 1);
     this.scene.background = new THREE.Color(palette.background);
     this.scene.fog = new THREE.FogExp2(palette.fog, 0.035);
+  }
+
+  private clearRenderTarget(target: THREE.WebGLRenderTarget): void {
+    const clearColor = new THREE.Color();
+    this.renderer.getClearColor(clearColor);
+    const clearAlpha = this.renderer.getClearAlpha();
+    this.renderer.setRenderTarget(target);
+    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.clear();
+    this.renderer.setRenderTarget(null);
+    this.renderer.setClearColor(clearColor, clearAlpha);
   }
 }
 
