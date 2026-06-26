@@ -27,6 +27,7 @@ export interface AnalysisOptions {
 }
 
 export interface AudioFeatures {
+  timestampMs: number;
   rms: number;
   bass: number;
   mid: number;
@@ -47,6 +48,11 @@ export interface AudioFeatures {
   bands: Float32Array;
   bandEnvelopes: Float32Array;
   bandPeaks: Float32Array;
+  bandTransients: Float32Array;
+  slowBands: Float32Array;
+  novelty: number;
+  onsetDensity: number;
+  loudnessTrend: number;
   isSilent: boolean;
 }
 

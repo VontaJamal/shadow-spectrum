@@ -19,6 +19,7 @@ export class AudioEngine {
   private currentSource?: AudioSource;
   private extractor = new FeatureExtractor();
   private frequencyData = new Uint8Array(0);
+  private waveformData = new Uint8Array(0);
   private nativeFeatureCleanup?: () => void;
   private nativeStatusCleanup?: () => void;
   private rafId = 0;
@@ -95,6 +96,7 @@ export class AudioEngine {
     this.sourceNode = this.audioContext.createMediaStreamSource(stream);
     this.sourceNode.connect(this.analyser);
     this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+    this.waveformData = new Uint8Array(this.analyser.fftSize);
   }
 
   private async startNativeSystemAudio(): Promise<void> {
@@ -139,13 +141,13 @@ export class AudioEngine {
       return;
     }
 
-    const waveformData = new Uint8Array(this.analyser.fftSize);
     this.analyser.getByteFrequencyData(this.frequencyData);
-    this.analyser.getByteTimeDomainData(waveformData);
+    this.analyser.getByteTimeDomainData(this.waveformData);
 
-    const features = this.extractor.extract(this.frequencyData, waveformData, {
+    const features = this.extractor.extract(this.frequencyData, this.waveformData, {
       ...this.options,
-      sampleRate: this.audioContext.sampleRate
+      sampleRate: this.audioContext.sampleRate,
+      timestampMs: performance.now()
     });
 
     if (features.isSilent) {
@@ -173,6 +175,8 @@ export class AudioEngine {
     this.sourceNode = undefined;
     this.audioContext = undefined;
     this.analyser = undefined;
+    this.frequencyData = new Uint8Array(0);
+    this.waveformData = new Uint8Array(0);
   }
 
   private stopNativeSystemAudio(): void {
@@ -212,6 +216,12 @@ interface NativeFeaturePayload {
     bands?: number[];
     bandEnvelopes?: number[];
     bandPeaks?: number[];
+    bandTransients?: number[];
+    slowBands?: number[];
+    timestampMs?: number;
+    novelty?: number;
+    onsetDensity?: number;
+    loudnessTrend?: number;
     isSilent: boolean;
   };
 }
@@ -240,6 +250,7 @@ export function deserializeNativeFeatures(payload: unknown, sensitivity: number)
   );
 
   return {
+    timestampMs: payload.features.timestampMs ?? performance.now(),
     rms: scale(payload.features.rms),
     bass: scale(payload.features.bass),
     mid: scale(payload.features.mid),
@@ -260,6 +271,11 @@ export function deserializeNativeFeatures(payload: unknown, sensitivity: number)
     bands,
     bandEnvelopes: toScaledFloatArray(payload.features.bandEnvelopes, scale, VISUAL_BAND_COUNT, () => bands),
     bandPeaks: toScaledFloatArray(payload.features.bandPeaks, scale, VISUAL_BAND_COUNT, () => bands),
+    bandTransients: toScaledFloatArray(payload.features.bandTransients, scale, VISUAL_BAND_COUNT, () => new Float32Array(VISUAL_BAND_COUNT)),
+    slowBands: toScaledFloatArray(payload.features.slowBands, scale, VISUAL_BAND_COUNT, () => bands),
+    novelty: scale(payload.features.novelty ?? payload.features.spectralFlux ?? 0),
+    onsetDensity: scale(payload.features.onsetDensity ?? 0),
+    loudnessTrend: Math.min(1, Math.max(-1, payload.features.loudnessTrend ?? 0)),
     isSilent: payload.features.isSilent
   };
 }
