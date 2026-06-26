@@ -6,7 +6,7 @@ import { ControlOverlay } from './ControlOverlay';
 
 const settings: VisualizerSettings = {
   sourceMode: 'synthetic-demo',
-  presetId: 'particle-field',
+  presetId: 'feedback-tunnel',
   paletteId: 'aurora',
   sensitivity: 1.1,
   smoothing: 0.78,
@@ -71,10 +71,10 @@ describe('ControlOverlay', () => {
     );
 
     await user.selectOptions(screen.getByLabelText(/source/i), 'microphone');
-    await user.selectOptions(screen.getByLabelText(/preset/i), 'liquid-ribbons');
+    await user.selectOptions(screen.getByLabelText(/preset/i), 'wireframe-cascade');
 
     expect(onSettingsChange).toHaveBeenCalledWith({ sourceMode: 'microphone' });
-    expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'liquid-ribbons' });
+    expect(onSettingsChange).toHaveBeenCalledWith({ presetId: 'wireframe-cascade' });
   });
 
   it('persists auto-cycle changes through the settings callback', async () => {

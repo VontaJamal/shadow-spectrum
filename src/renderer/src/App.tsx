@@ -4,7 +4,7 @@ import { createSilentAudioFeatures } from './audio/featureExtractor';
 import type { AudioFeatures, AudioSourceKind, AudioSourceStatus } from './audio/types';
 import { ControlOverlay } from './ui/ControlOverlay';
 import { VisualizerCanvas } from './visualization/VisualizerCanvas';
-import { presets } from './visualization/options';
+import { defaultPresetId, normalizePresetId, presets } from './visualization/options';
 import type { PaletteId, PresetId } from './visualization/types';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 import './styles.css';
@@ -21,7 +21,7 @@ export interface VisualizerSettings {
 
 const defaultSettings: VisualizerSettings = {
   sourceMode: 'synthetic-demo',
-  presetId: 'particle-field',
+  presetId: defaultPresetId,
   paletteId: 'aurora',
   sensitivity: 1.1,
   smoothing: 0.78,
@@ -32,8 +32,19 @@ const defaultSettings: VisualizerSettings = {
 const autoCycleArmMs = 45_000;
 const autoCycleFallbackMs = 60_000;
 
+export function normalizeVisualizerSettings(settings: VisualizerSettings): VisualizerSettings {
+  return {
+    ...settings,
+    presetId: normalizePresetId(settings.presetId)
+  };
+}
+
 export function App(): JSX.Element {
-  const [settings, setSettings] = usePersistedSettings<VisualizerSettings>('spectra-drift-settings', defaultSettings);
+  const [settings, setSettings] = usePersistedSettings<VisualizerSettings>(
+    'spectra-drift-settings',
+    defaultSettings,
+    normalizeVisualizerSettings
+  );
   const [status, setStatus] = useState<AudioSourceStatus>('idle');
   const [message, setMessage] = useState('Demo source ready');
   const [isRunning, setIsRunning] = useState(false);

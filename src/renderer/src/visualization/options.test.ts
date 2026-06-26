@@ -1,15 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { getPalette, palettes, presets } from './options';
+import { defaultPresetId, getPalette, normalizePresetId, palettes, presets } from './options';
 import { createPreset } from './presets';
 
 describe('visualization options', () => {
-  it('keeps the persisted preset ids compatible while upgrading their rendering', () => {
+  it('uses the new researched preset quartet in order', () => {
     expect(presets.map((preset) => preset.id)).toEqual([
-      'particle-field',
-      'liquid-ribbons',
-      'spectral-bloom',
-      'waveform-orbit'
+      'feedback-tunnel',
+      'wireframe-cascade',
+      'chromatic-flow',
+      'signal-scope'
     ]);
+    expect(presets.map((preset) => preset.label)).toEqual([
+      'Feedback Tunnel',
+      'Wireframe Cascade',
+      'Chromatic Flow',
+      'Signal Scope'
+    ]);
+  });
+
+  it('normalizes stale persisted preset ids to the new default', () => {
+    expect(defaultPresetId).toBe('feedback-tunnel');
+    for (const stalePresetId of ['particle-field', 'liquid-ribbons', 'spectral-bloom', 'waveform-orbit']) {
+      expect(normalizePresetId(stalePresetId)).toBe(defaultPresetId);
+    }
+    expect(normalizePresetId('chromatic-flow')).toBe('chromatic-flow');
   });
 
   it('provides cinematic palette metadata for every palette option', () => {
@@ -24,7 +38,7 @@ describe('visualization options', () => {
     }
   });
 
-  it('creates every persisted preset through the preset factory', () => {
+  it('creates every preset through the preset factory', () => {
     const palette = getPalette('aurora');
 
     for (const presetOption of presets) {
